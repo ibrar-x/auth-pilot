@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    name: Create Release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.id }}
+      upload_url: ${{ steps.create-release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: AuthPilot ${{ github.ref_name }}
+          draft: true
+          prerelease: false
+
+  build-and-release:
+    name: Build & Release (${{ matrix.platform }})
+    needs: create-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            target: aarch64-apple-darwin
+            name: macOS Apple Silicon
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            target: x86_64-apple-darwin
+            name: macOS Intel
+          - platform: ubuntu-22.04
+            args: ''
+            target: x86_64-unknown-linux-gnu
+            name: Linux
+          - platform: windows-latest
+            args: ''
+            target: x86_64-pc-windows-msvc
+            name: Windows
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.args }}
+          projectPath: src-tauri
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+
+      - name: Upload artifacts to release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            src-tauri/target/*/bundle/**/*.dmg
+            src-tauri/target/*/bundle/**/*.deb
+            src-tauri/target/*/bundle/**/*.AppImage
+            src-tauri/target/*/bundle/**/*.msi
+            src-tauri/target/*/bundle/**/*.exe
+          fail_on_unmatched_files: false

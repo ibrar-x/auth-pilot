@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@variant dark (&:is(.dark *));
+
+@font-face {
+  font-family: 'MarkForMC';
+  src: url('/fonts/MarkForMC.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --canvas-cream: #F3F0EE;
+  --ink-black: #141413;
+  --signal-orange: #CF4500;
+  --light-signal-orange: #F37338;
+  --white: #FFFFFF;
+  --slate-gray: #696969;
+  --dust-taupe: #D1CDC7;
+  --link-blue: #3860BE;
+  --charcoal: #262627;
+  --lifted-cream: #FCFBFA;
+
+  --shadow-l1: rgba(0, 0, 0, 0.04) 0px 4px 24px 0px;
+  --shadow-l2: rgba(0, 0, 0, 0.08) 0px 24px 48px 0px;
+}
+
+body {
+  font-family: 'MarkForMC', 'SofiaSans', Arial, sans-serif;
+  background-color: var(--canvas-cream);
+  color: var(--ink-black);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dark mode overrides */
+.dark body {
+  background-color: #1a1a1a;
+  color: #f3f0ee;
+}
+
+/* Utility helpers */
+.font-mark {
+  font-family: 'MarkForMC', 'SofiaSans', Arial, sans-serif;
+}
+
+.text-ink {
+  color: var(--ink-black);
+}
+
+.text-slate {
+  color: var(--slate-gray);
+}
+
+.text-dust {
+  color: var(--dust-taupe);
+}
+
+.text-signal {
+  color: var(--signal-orange);
+}
+
+.text-light-signal {
+  color: var(--light-signal-orange);
+}
+
+.bg-canvas {
+  background-color: var(--canvas-cream);
+}
+
+.bg-ink {
+  background-color: var(--ink-black);
+}
+
+.bg-lifted {
+  background-color: var(--lifted-cream);
+}
+
+.bg-signal {
+  background-color: var(--signal-orange);
+}
+
+.shadow-l1 {
+  box-shadow: var(--shadow-l1);
+}
+
+.shadow-l2 {
+  box-shadow: var(--shadow-l2);
+}
+
+/* Eyebrow label */
+.eyebrow {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.eyebrow::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--light-signal-orange);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* Inputs */
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+  font-family: 'MarkForMC', 'SofiaSans', Arial, sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--dust-taupe);
+  border-radius: 4px;
+}
+
+/* Animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.3s ease-out forwards;
+}

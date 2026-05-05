@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/macOS-config-schema.json",
+  "bundle": {
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-",
+      "entitlements": null
+    }
+  }
+}
