@@ -41,9 +41,7 @@ pub fn setup_tray(
 
             if id == "quit" {
                 app.exit(0);
-            } else if id == "show_dashboard" {
-                let _ = show_dashboard(app);
-            } else if id == "show_settings" {
+            } else if id == "show_dashboard" || id == "show_settings" {
                 let _ = show_dashboard(app);
             } else if id.starts_with("switch_") {
                 let account_id = id.strip_prefix("switch_").unwrap_or("");
