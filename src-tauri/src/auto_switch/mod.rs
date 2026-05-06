@@ -41,7 +41,7 @@ pub fn should_auto_switch(
         .map(|s| s.switch_threshold)
         .unwrap_or(95.0);
 
-    let over_threshold = usage.primary_used_percent.map_or(false, |p| p >= threshold);
+    let over_threshold = usage.primary_used_percent.is_some_and(|p| p >= threshold);
 
     if over_threshold {
         tracing::info!(

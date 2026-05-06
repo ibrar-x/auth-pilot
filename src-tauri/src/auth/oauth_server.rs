@@ -226,7 +226,7 @@ async fn run_oauth_server(
             HandleResult::Continue => continue,
             HandleResult::Success(account) => {
                 server.unblock();
-                return Ok(OAuthLoginResult { account });
+                return Ok(OAuthLoginResult { account: *account });
             }
             HandleResult::Error(e) => {
                 server.unblock();
@@ -238,7 +238,7 @@ async fn run_oauth_server(
 
 enum HandleResult {
     Continue,
-    Success(StoredAccount),
+    Success(Box<StoredAccount>),
     Error(anyhow::Error),
 }
 
@@ -321,7 +321,7 @@ async fn handle_oauth_request(
                 );
                 let _ = request.respond(response);
 
-                return HandleResult::Success(account);
+                return HandleResult::Success(Box::new(account));
             }
             Err(e) => {
                 let _ = request.respond(

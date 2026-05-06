@@ -53,6 +53,7 @@ impl StoredAccount {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_chatgpt(
         name: String,
         email: Option<String>,
@@ -193,10 +194,7 @@ impl AccountInfo {
             name: account.name.clone(),
             email: account.email.clone(),
             plan_type: account.plan_type.clone(),
-            subscription_expires_at: account
-                .subscription_expires_at
-                .clone()
-                .or(fallback_subscription),
+            subscription_expires_at: account.subscription_expires_at.or(fallback_subscription),
             auth_mode: account.auth_mode,
             is_active: active_id == Some(&account.id),
             created_at: account.created_at,

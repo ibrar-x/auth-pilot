@@ -303,7 +303,7 @@ fn validate_slim_payload(payload: &SlimPayload) -> anyhow::Result<()> {
                 if account
                     .api_key
                     .as_ref()
-                    .map_or(true, |key| key.trim().is_empty())
+                    .is_none_or(|key| key.trim().is_empty())
                 {
                     anyhow::bail!("API key is missing for account {}", account.name);
                 }
@@ -312,7 +312,7 @@ fn validate_slim_payload(payload: &SlimPayload) -> anyhow::Result<()> {
                 if account
                     .refresh_token
                     .as_ref()
-                    .map_or(true, |token| token.trim().is_empty())
+                    .is_none_or(|token| token.trim().is_empty())
                 {
                     anyhow::bail!("Refresh token is missing for account {}", account.name);
                 }

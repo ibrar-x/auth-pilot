@@ -117,8 +117,8 @@ pub fn encrypt(plaintext: &str, machine_id: &str) -> Result<EncryptedBlob> {
 
     Ok(EncryptedBlob {
         v: 1,
-        salt: base64::engine::general_purpose::STANDARD.encode(&salt),
-        nonce: base64::engine::general_purpose::STANDARD.encode(&nonce),
+        salt: base64::engine::general_purpose::STANDARD.encode(salt),
+        nonce: base64::engine::general_purpose::STANDARD.encode(nonce),
         ciphertext: base64::engine::general_purpose::STANDARD.encode(&ciphertext),
     })
 }

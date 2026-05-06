@@ -284,6 +284,7 @@ pub fn update_account_metadata(
     Ok(updated)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_account_chatgpt_tokens(
     account_id: &str,
     id_token: String,

@@ -43,15 +43,13 @@ pub fn restore_account(account_id: &str) -> Result<AuthDotJson> {
 
     if !path.exists() {
         // Fallback: try to create snapshot from account data
-        if let Ok(account) = get_account(account_id) {
-            if let Some(account) = account {
-                tracing::info!(
-                    "Creating missing snapshot for account {} from stored auth_data",
-                    account_id
-                );
-                snapshot_account_from_data(&account)?;
-                return restore_account(account_id);
-            }
+        if let Ok(Some(account)) = get_account(account_id) {
+            tracing::info!(
+                "Creating missing snapshot for account {} from stored auth_data",
+                account_id
+            );
+            snapshot_account_from_data(&account)?;
+            return restore_account(account_id);
         }
         anyhow::bail!("No auth.json snapshot found for account {}", account_id);
     }

@@ -64,13 +64,13 @@ pub async fn warmup_all_accounts() -> Result<WarmupSummary, String> {
     let store = load_accounts().map_err(|e| e.to_string())?;
     let total_accounts = store.accounts.len();
 
-    let results: Vec<(String, bool)> = stream::iter(store.accounts.into_iter())
+    let results: Vec<(String, bool)> = stream::iter(store.accounts)
         .map(|account| async move {
             let account_id = account.id.clone();
             let failed = warmup_account(account_id.clone()).await.is_err();
             (account_id, failed)
         })
-        .buffer_unordered(total_accounts.min(10).max(1))
+        .buffer_unordered(total_accounts.clamp(1, 10))
         .collect()
         .await;
 

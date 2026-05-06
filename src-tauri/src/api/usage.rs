@@ -259,7 +259,7 @@ fn extract_credits(credits: Option<CreditStatusDetails>) -> Option<CreditStatusD
 }
 
 pub async fn refresh_all_usage(accounts: &[StoredAccount]) -> Vec<UsageInfo> {
-    let concurrency = accounts.len().min(10).max(1);
+    let concurrency = accounts.len().clamp(1, 10);
     let results: Vec<UsageInfo> = stream::iter(accounts.iter().cloned())
         .map(|account| async move {
             match get_account_usage(&account).await {

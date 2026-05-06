@@ -1,5 +1,7 @@
 //! AuthPilot — Intelligent Codex Account Switcher
 
+#![allow(unexpected_cfgs)]
+
 pub mod api;
 pub mod auth;
 pub mod auto_switch;
@@ -75,6 +77,7 @@ pub fn run() {
 
             // Set macOS activation policy to accessory (no dock icon)
             #[cfg(target_os = "macos")]
+            #[allow(unexpected_cfgs)]
             {
                 use objc::runtime::Class;
                 use objc::{msg_send, sel, sel_impl};
