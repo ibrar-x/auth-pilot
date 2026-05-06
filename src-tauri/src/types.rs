@@ -299,6 +299,8 @@ pub struct AppSettings {
     pub account_settings: HashMap<String, AccountSettings>,
     pub theme: String,
     pub usage_display_mode: UsageDisplayMode,
+    pub start_at_login: bool,
+    pub show_in_dock: bool,
 }
 
 impl Default for AppSettings {
@@ -312,6 +314,8 @@ impl Default for AppSettings {
             account_settings: HashMap::new(),
             theme: String::from("system"),
             usage_display_mode: UsageDisplayMode::Remaining,
+            start_at_login: false,
+            show_in_dock: false,
         }
     }
 }

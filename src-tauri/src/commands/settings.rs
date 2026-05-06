@@ -14,6 +14,7 @@ pub async fn get_settings() -> Result<AppSettings, String> {
 
 #[tauri::command]
 pub async fn save_settings(new_settings: AppSettings, app: AppHandle) -> Result<(), String> {
+    crate::app_behavior::apply_settings(&new_settings).map_err(|e| e.to_string())?;
     settings::save_settings(&new_settings).map_err(|e| e.to_string())?;
 
     if let Some(state) = app.try_state::<Arc<RwLock<MonitorState>>>() {
@@ -23,6 +24,9 @@ pub async fn save_settings(new_settings: AppSettings, app: AppHandle) -> Result<
 
     let _ = crate::tray::refresh_accounts_and_tray_menu(&app).await;
     let _ = app.emit("settings-updated", &new_settings);
+    if let Err(err) = crate::app_behavior::show_main_window(&app) {
+        tracing::warn!("Failed to keep main window visible after settings save: {err}");
+    }
 
     Ok(())
 }

@@ -48,6 +48,8 @@ export interface AppSettings {
   account_settings: Record<string, AccountSettings>;
   theme: "light" | "dark" | "system";
   usage_display_mode?: UsageDisplayMode;
+  start_at_login?: boolean;
+  show_in_dock?: boolean;
 }
 
 export type UsageDisplayMode = "remaining" | "used";

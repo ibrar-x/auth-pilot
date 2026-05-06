@@ -74,13 +74,7 @@ pub fn tray_popup_interaction(
 
 #[tauri::command]
 pub async fn show_main_window(app: AppHandle) -> Result<(), String> {
-    if let Some(popup) = app.get_webview_window("tray-popup") {
-        let _ = popup.hide();
-    }
-    if let Some(window) = app.get_webview_window("main") {
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-    }
+    crate::app_behavior::show_main_window(&app).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -92,12 +86,8 @@ pub async fn quit_app(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn open_settings(app: AppHandle) -> Result<(), String> {
-    if let Some(popup) = app.get_webview_window("tray-popup") {
-        let _ = popup.hide();
-    }
+    crate::app_behavior::show_main_window(&app).map_err(|e| e.to_string())?;
     if let Some(window) = app.get_webview_window("main") {
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
         let _ = window.emit("open-settings", ());
     }
     Ok(())

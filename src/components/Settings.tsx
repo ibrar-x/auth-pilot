@@ -47,6 +47,7 @@ const USAGE_DISPLAY_MODES = [
 export function Settings({ settings, onSave, onClose, accounts }: SettingsProps) {
   const [formSettings, setFormSettings] = useState<AppSettings>({ ...settings });
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
 
   const handleSave = async () => {
@@ -54,7 +55,8 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
       setSaving(true);
       await onSave(formSettings);
       applyTheme(formSettings.theme);
-      onClose();
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
     } catch (err) {
       console.error("Failed to save settings:", err);
     } finally {
@@ -209,6 +211,66 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
               </button>
             </div>
 
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <label className="text-sm font-medium text-[#141413] dark:text-[#f3f0ee]">
+                  Start at login
+                </label>
+                <p className="text-xs text-[#696969] dark:text-[#9a9a9a] mt-1">
+                  Launch AuthPilot automatically when you sign in to macOS.
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setFormSettings((prev) => ({
+                    ...prev,
+                    start_at_login: !(prev.start_at_login ?? false),
+                  }))
+                }
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-[4px] transition-colors ${
+                  formSettings.start_at_login
+                    ? "bg-[#141413] dark:bg-[#f3f0ee]"
+                    : "bg-[#D1CDC7] dark:bg-[#3a3a3a]"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-[4px] bg-white transition-transform ${
+                    formSettings.start_at_login ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <label className="text-sm font-medium text-[#141413] dark:text-[#f3f0ee]">
+                  Show in Dock
+                </label>
+                <p className="text-xs text-[#696969] dark:text-[#9a9a9a] mt-1">
+                  Keep AuthPilot visible in the Dock and app switcher.
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setFormSettings((prev) => ({
+                    ...prev,
+                    show_in_dock: !(prev.show_in_dock ?? false),
+                  }))
+                }
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-[4px] transition-colors ${
+                  formSettings.show_in_dock
+                    ? "bg-[#141413] dark:bg-[#f3f0ee]"
+                    : "bg-[#D1CDC7] dark:bg-[#3a3a3a]"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-[4px] bg-white transition-transform ${
+                    formSettings.show_in_dock ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-[#141413] dark:text-[#f3f0ee] mb-2">
                 Usage Bars
@@ -325,6 +387,11 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
       {exportSuccess && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 bg-[#141413] dark:bg-[#f3f0ee] text-[#F3F0EE] dark:text-[#141413] rounded-[4px] shadow-l2 text-sm flex items-center gap-2 z-50 animate-fade-in-up">
           <span className="text-[#F37338]">✓</span> Settings copied
+        </div>
+      )}
+      {saveSuccess && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 bg-[#141413] dark:bg-[#f3f0ee] text-[#F3F0EE] dark:text-[#141413] rounded-[4px] shadow-l2 text-sm flex items-center gap-2 z-50 animate-fade-in-up">
+          <span className="text-[#F37338]">✓</span> Settings saved
         </div>
       )}
     </div>

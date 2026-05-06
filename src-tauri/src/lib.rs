@@ -3,6 +3,7 @@
 #![allow(unexpected_cfgs)]
 
 pub mod api;
+pub mod app_behavior;
 pub mod auth;
 pub mod auto_switch;
 pub mod commands;
@@ -58,6 +59,9 @@ pub fn run() {
 
             // Initialize monitor state
             let settings = settings::load_settings().unwrap_or_default();
+            if let Err(e) = app_behavior::apply_settings(&settings) {
+                tracing::warn!("Failed to apply app behavior settings: {e}");
+            }
             let cached_accounts = crate::auth::storage::load_accounts_with_current_active().ok();
             let state = Arc::new(RwLock::new(MonitorState {
                 settings,
@@ -75,19 +79,6 @@ pub fn run() {
 
             // Start background monitor
             monitor::start_monitor(app_handle.clone(), state);
-
-            // Set macOS activation policy to accessory (no dock icon)
-            #[cfg(target_os = "macos")]
-            #[allow(unexpected_cfgs)]
-            {
-                use objc::runtime::Class;
-                use objc::{msg_send, sel, sel_impl};
-                unsafe {
-                    let cls = Class::get("NSApplication").unwrap();
-                    let app: *mut objc::runtime::Object = msg_send![cls, sharedApplication];
-                    let _: bool = msg_send![app, setActivationPolicy: 1i64];
-                }
-            }
 
             Ok(())
         })
@@ -134,8 +125,16 @@ pub fn run() {
             open_settings,
             quit_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Err(err) = crate::app_behavior::show_main_window(app_handle) {
+                    tracing::warn!("Failed to show dashboard after Dock reopen: {err}");
+                }
+            }
+        });
 }
 
 fn setup_logging() {
