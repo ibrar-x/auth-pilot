@@ -27,9 +27,9 @@ pub async fn execute_switch(
 
     // 3. Notify user
     if was_running {
-        if let Ok(account) = crate::auth::storage::get_account(target_account_id) {
+        if let Ok(_account) = crate::auth::storage::get_account(target_account_id) {
             #[cfg(target_os = "macos")]
-            if let Some(name) = account.map(|a| a.name) {
+            if let Some(name) = _account.map(|a| a.name) {
                 let _ = app_handle
                     .notification()
                     .builder()
