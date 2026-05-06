@@ -23,10 +23,10 @@ use tokio::sync::RwLock;
 use commands::{
     add_account_from_file, cancel_login, complete_login, delete_account, ensure_file_auth_mode,
     export_accounts_full_encrypted_file, export_accounts_slim_text, export_settings,
-    get_active_account_info, get_masked_account_ids, get_settings, get_switch_log, get_usage,
+    get_active_account_info, get_masked_account_ids, get_settings, get_switch_log, get_tray_popup_data, get_usage,
     import_accounts_full_encrypted_file, import_accounts_slim_text, is_file_auth_mode_required,
-    list_accounts, manual_switch_account, refresh_account_metadata, refresh_all_accounts_usage,
-    rename_account, save_settings, set_masked_account_ids, start_login, switch_account,
+    list_accounts, manual_switch_account, popup_switch_account, quit_app, refresh_account_metadata, refresh_all_accounts_usage,
+    rename_account, save_settings, set_masked_account_ids, show_main_window, start_login, switch_account,
     warmup_account, warmup_all_accounts,
 };
 use types::MonitorState;
@@ -125,6 +125,11 @@ pub fn run() {
             get_switch_log,
             // Manual switch
             manual_switch_account,
+            // Tray popup
+            get_tray_popup_data,
+            popup_switch_account,
+            show_main_window,
+            quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

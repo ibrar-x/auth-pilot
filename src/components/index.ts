@@ -4,3 +4,4 @@ export { AddAccountModal } from "./AddAccountModal";
 export { Dashboard } from "./Dashboard";
 export { Settings } from "./Settings";
 export { SwitchLog } from "./SwitchLog";
+export { TrayPopup } from "./TrayPopup";

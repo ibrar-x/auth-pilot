@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dashboard } from "./components";
+import { Dashboard, TrayPopup } from "./components";
 import { invokeBackend, isTauriRuntime } from "./lib/platform";
 import type { AppSettings } from "./types";
 import "./App.css";
@@ -23,6 +23,17 @@ function applyTheme(theme: string) {
 function App() {
   const [firstRunRequired, setFirstRunRequired] = useState(false);
   const [consentGiven, setConsentGiven] = useState(false);
+  const [windowLabel, setWindowLabel] = useState<string>("main");
+
+  useEffect(() => {
+    if (isTauriRuntime()) {
+      import("@tauri-apps/api/window")
+        .then(({ getCurrentWindow }) => {
+          setWindowLabel(getCurrentWindow().label);
+        })
+        .catch(() => setWindowLabel("main"));
+    }
+  }, []);
 
   useEffect(() => {
     if (isTauriRuntime()) {
@@ -71,6 +82,14 @@ function App() {
       console.error("Failed to enable file auth mode:", err);
     }
   };
+
+  if (windowLabel === "tray-popup") {
+    return (
+      <div style={{ padding: 8 }}>
+        <TrayPopup />
+      </div>
+    );
+  }
 
   if (firstRunRequired && !consentGiven) {
     return (

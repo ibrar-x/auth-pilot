@@ -18,6 +18,19 @@
         "minWidth": 600,
         "minHeight": 500,
         "visible": false
+      },
+      {
+        "label": "tray-popup",
+        "title": "AuthPilot",
+        "width": 272,
+        "height": 420,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "center": false
       }
     ],
     "security": {
@@ -26,7 +39,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
