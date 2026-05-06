@@ -2,15 +2,19 @@
 
 > Intelligent multi-account manager for OpenAI Codex CLI. Auto-switches accounts when usage limits are reached — never hit a rate limit again.
 
-AuthPilot lives in your macOS menu bar, silently monitors all your Codex accounts in the background, and automatically swaps to the healthiest account when limits approach. No more manual `auth.json` juggling.
+AuthPilot lives in your menu bar or system tray, silently monitors all your Codex accounts in the background, and automatically swaps to the healthiest account when limits approach. No more manual `auth.json` juggling.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-macos-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)
 ![Tauri](https://img.shields.io/badge/built%20with-Tauri%20v2-FFC131?logo=tauri)
+
+## Screenshots
+
+![AuthPilot dashboard](docs/assets/screenshots/auth-pilot-app-ss.png)
 
 ## Features
 
-- **Tray-only macOS app** — Lives in the menu bar, no dock icon clutter
+- **Tray-first desktop app** — Lives in the macOS menu bar, Windows tray, or Linux status area
 - **Auto-switch on limit** — Monitors usage every 60s; switches accounts automatically when you hit configurable thresholds
 - **Kill + relaunch Codex** — Seamlessly quits and restarts the Codex Desktop app on every switch so the new session is active immediately
 - **Multiple auth modes** — Supports both ChatGPT OAuth login and direct API key import
@@ -40,7 +44,7 @@ AuthPilot lives in your macOS menu bar, silently monitors all your Codex account
 - [Rust](https://rustup.rs/)
 - [Node.js](https://nodejs.org/) (v20+)
 - [pnpm](https://pnpm.io/)
-- macOS (primary target — Apple Silicon or Intel)
+- macOS, Windows, or Linux
 
 ### Setup
 
@@ -62,9 +66,9 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-The built app bundle will be at:
+The built app artifacts will be under:
 ```
-src-tauri/target/release/bundle/macos/AuthPilot.app
+src-tauri/target/release/bundle/
 ```
 
 ## CI/CD
@@ -72,9 +76,11 @@ src-tauri/target/release/bundle/macos/AuthPilot.app
 This project uses GitHub Actions for:
 - **CI** — Frontend type checking, Rust linting and tests on every PR
 - **Build** — Cross-platform builds (macOS, Windows, Linux) on every push to main
-- **Release** — Automated release publishing with signed binaries on version tags
+- **Release** — Automated macOS, Windows, and Linux release publishing on version tags
 
 See [`.github/workflows/`](.github/workflows/) for workflow definitions.
+
+Release artifacts are unsigned unless signing and notarization secrets are configured in GitHub Actions.
 
 ## License
 

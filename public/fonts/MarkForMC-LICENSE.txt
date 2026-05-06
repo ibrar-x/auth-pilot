@@ -1,0 +1,17 @@
+FREE FONTS : http://www.OnlineWebFonts.Com
+
+You must credit the author.
+
+Copy this link on your web:
+
+<div>Fonts made from <a href="http://www.onlinewebfonts.com">Web Fonts</a> is licensed by CC BY 4.0</div>
+
+OR
+
+<a href="http://www.onlinewebfonts.com">Web Fonts</a>
+
+OnlineWebFonts.Com provides free fonts, premium fonts, and dingbats. Some fonts may be trial versions of full versions and may not allow embedding unless a commercial license is purchased, or may contain a limited character set. Review any files included with your download. If no information is provided, use at your own discretion or contact the author directly.
+
+About AuthPilot
+
+AuthPilot uses the MarkForMC font family licensed above.
