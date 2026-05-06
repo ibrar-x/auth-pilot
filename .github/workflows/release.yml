@@ -1,116 +1,168 @@
-name: Release
+name: Release Desktop Apps
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
-  create-release:
-    name: Create Release
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create-release.outputs.id }}
-      upload_url: ${{ steps.create-release.outputs.upload_url }}
+  validate:
+    name: Validate
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Create Release
-        id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: AuthPilot ${{ github.ref_name }}
-          draft: true
-          prerelease: false
-
-  build-and-release:
-    name: Build & Release (${{ matrix.platform }})
-    needs: create-release
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            args: '--target aarch64-apple-darwin'
-            target: aarch64-apple-darwin
-            name: macOS Apple Silicon
-          - platform: macos-latest
-            args: '--target x86_64-apple-darwin'
-            target: x86_64-apple-darwin
-            name: macOS Intel
-          - platform: ubuntu-22.04
-            args: ''
-            target: x86_64-unknown-linux-gnu
-            name: Linux
-          - platform: windows-latest
-            args: ''
-            target: x86_64-pc-windows-msvc
-            name: Windows
-
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends --no-install-suggests \
+            curl \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2 \
+            file
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
         with:
-          targets: ${{ matrix.target }}
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Check Rust
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  build-release:
+    name: Build ${{ matrix.label }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS universal
+            platform: macos-latest
+            rustTargets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+          - label: Windows x64
+            platform: windows-latest
+            rustTargets: ""
+            args: ""
+          - label: Linux x64
+            platform: ubuntu-22.04
+            rustTargets: ""
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y --no-install-recommends --no-install-suggests \
+            curl \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2 \
+            file
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          workspaces: src-tauri
+          version: 9
 
-      - name: Build Tauri app
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        if: matrix.rustTargets == ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust with targets
+        if: matrix.rustTargets != ''
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTargets }}
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and upload ${{ matrix.label }} app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "AuthPilot ${{ env.RELEASE_TAG }}"
+          releaseBody: "Download the installer for your platform from the assets below."
+          releaseDraft: true
+          prerelease: false
           args: ${{ matrix.args }}
-          projectPath: src-tauri
-          releaseId: ${{ needs.create-release.outputs.release_id }}
 
-      - name: Upload artifacts to release
-        if: success()
-        uses: softprops/action-gh-release@v2
+  publish-release:
+    name: Publish Release
+    runs-on: ubuntu-22.04
+    needs: build-release
+    if: ${{ success() }}
+    steps:
+      - name: Publish draft release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            src-tauri/target/*/bundle/**/*.dmg
-            src-tauri/target/*/bundle/**/*.deb
-            src-tauri/target/*/bundle/**/*.AppImage
-            src-tauri/target/*/bundle/**/*.msi
-            src-tauri/target/*/bundle/**/*.exe
-          fail_on_unmatched_files: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
