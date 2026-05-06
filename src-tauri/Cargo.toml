@@ -1,12 +1,12 @@
 [package]
-name = "codex-account-switcher"
+name = "authpilot"
 version = "1.0.0"
 description = "Intelligent multi-account manager for Codex CLI — AuthPilot"
 authors = ["user"]
 edition = "2021"
 
 [lib]
-name = "codex_account_switcher_lib"
+name = "authpilot_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -135,7 +135,7 @@ fn setup_logging() {
         .map(|h| h.join(".authpilot"))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    let file_appender = RollingFileAppender::new(Rotation::DAILY, config_dir, "switcher.log");
+    let file_appender = RollingFileAppender::new(Rotation::DAILY, config_dir, "authpilot.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     // Leak the guard so the background writer thread stays alive for the program lifetime
