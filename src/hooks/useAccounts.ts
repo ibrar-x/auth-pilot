@@ -7,7 +7,7 @@ import type {
   AppSettings,
   SwitchEvent,
 } from "../types";
-import { invokeBackend, type FileSource } from "../lib/platform";
+import { invokeBackend, isTauriRuntime, type FileSource } from "../lib/platform";
 
 export function useAccounts() {
   const [accounts, setAccounts] = useState<AccountWithUsage[]>([]);
@@ -207,7 +207,20 @@ export function useAccounts() {
     async (accountId: string) => {
       try {
         await invokeBackend("manual_switch_account", { accountId });
-        await loadAccounts(true);
+        setAccounts((prev) =>
+          prev.map((account) => ({
+            ...account,
+            is_active: account.id === accountId,
+          }))
+        );
+        const accountList = await loadAccounts(true);
+        setAccounts((prev) =>
+          prev.map((account) => ({
+            ...account,
+            is_active: account.id === accountId,
+          }))
+        );
+        return accountList;
       } catch (err) {
         throw err;
       }
@@ -341,6 +354,37 @@ export function useAccounts() {
     
     return () => clearInterval(interval);
   }, [loadAccounts, refreshUsage]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<SwitchEvent>("account-switched", () => {
+          loadAccounts(true).catch((err) => {
+            console.error("Failed to reload accounts after switch:", err);
+          });
+        })
+      )
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to listen for account switch events:", err);
+      });
+
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, [loadAccounts]);
 
   return {
     accounts,

@@ -151,24 +151,62 @@ pub fn sync_active_account_from_current_auth(store: &mut AccountsStore) -> Resul
         None => return Ok(store.active_account_id.clone()),
     };
 
-    let resolved_id = store
-        .accounts
-        .iter()
-        .find(|account| account_matches_auth(account, &auth))
-        .map(|account| account.id.clone());
+    let previous_active_id = store.active_account_id.clone();
+    let resolved_id = sync_active_account_from_auth(store, &auth);
 
-    if let Some(resolved_id) = resolved_id {
-        if store.active_account_id.as_deref() != Some(resolved_id.as_str()) {
-            store.active_account_id = Some(resolved_id.clone());
-            save_accounts(store)?;
-        }
-        return Ok(Some(resolved_id));
+    if store.active_account_id != previous_active_id {
+        save_accounts(store)?;
     }
 
-    Ok(store.active_account_id.clone())
+    Ok(resolved_id)
 }
 
-fn account_matches_auth(account: &StoredAccount, auth: &AuthDotJson) -> bool {
+fn sync_active_account_from_auth(store: &mut AccountsStore, auth: &AuthDotJson) -> Option<String> {
+    let matches: Vec<(String, u8)> = store
+        .accounts
+        .iter()
+        .filter_map(|account| {
+            let score = account_auth_match_score(account, auth);
+            (score > 0).then(|| (account.id.clone(), score))
+        })
+        .collect();
+
+    let highest_score = matches.iter().map(|(_, score)| *score).max();
+    let Some(highest_score) = highest_score else {
+        return store.active_account_id.clone();
+    };
+
+    let best_ids: Vec<&String> = matches
+        .iter()
+        .filter(|(_, score)| *score == highest_score)
+        .map(|(id, _)| id)
+        .collect();
+
+    if let Some(active_id) = store.active_account_id.as_deref() {
+        if best_ids.iter().any(|id| id.as_str() == active_id) {
+            return Some(active_id.to_string());
+        }
+    }
+
+    match best_ids.as_slice() {
+        [resolved_id] => {
+            if store.active_account_id.as_deref() != Some(resolved_id.as_str()) {
+                store.active_account_id = Some((*resolved_id).clone());
+            }
+            Some((*resolved_id).clone())
+        }
+        _ => {
+            tracing::warn!(
+                "Current auth matches multiple stored accounts equally; selecting first best match"
+            );
+            let resolved_id = (*best_ids[0]).clone();
+            store.active_account_id = Some(resolved_id.clone());
+            Some(resolved_id)
+        }
+    }
+}
+
+fn account_auth_match_score(account: &StoredAccount, auth: &AuthDotJson) -> u8 {
     match (&account.auth_data, auth) {
         (
             AuthData::ApiKey { key },
@@ -176,7 +214,8 @@ fn account_matches_auth(account: &StoredAccount, auth: &AuthDotJson) -> bool {
                 openai_api_key: Some(current_key),
                 ..
             },
-        ) => key == current_key,
+        ) if key == current_key => 100,
+        (AuthData::ApiKey { .. }, _) => 0,
         (
             AuthData::ChatGPT {
                 id_token,
@@ -193,7 +232,7 @@ fn account_matches_auth(account: &StoredAccount, auth: &AuthDotJson) -> bool {
                 || refresh_token == &current_tokens.refresh_token
                 || id_token == &current_tokens.id_token
             {
-                return true;
+                return 100;
             }
 
             let stored_claims = parse_chatgpt_id_token_claims(id_token);
@@ -208,17 +247,22 @@ fn account_matches_auth(account: &StoredAccount, auth: &AuthDotJson) -> bool {
                 .or(current_claims.account_id.as_deref());
 
             if stored_account_id.is_some() && stored_account_id == current_account_id {
-                return true;
+                return 80;
             }
 
             let stored_email = account.email.as_deref().or(stored_claims.email.as_deref());
             let current_email = current_claims.email.as_deref();
-            stored_account_id.is_none()
+            if stored_account_id.is_none()
                 && current_account_id.is_none()
                 && stored_email.is_some()
                 && stored_email == current_email
+            {
+                10
+            } else {
+                0
+            }
         }
-        _ => false,
+        _ => 0,
     }
 }
 
@@ -440,6 +484,15 @@ pub fn set_masked_account_ids(ids: Vec<String>) -> Result<()> {
 mod tests {
     use super::*;
     use crate::types::TokenData;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+
+    fn id_token_with_email(email: &str) -> String {
+        let payload = serde_json::json!({ "email": email });
+        format!(
+            "header.{}.signature",
+            URL_SAFE_NO_PAD.encode(payload.to_string())
+        )
+    }
 
     #[test]
     fn matches_api_key_auth_to_stored_account() {
@@ -450,7 +503,7 @@ mod tests {
             last_refresh: None,
         };
 
-        assert!(account_matches_auth(&account, &auth));
+        assert!(account_auth_match_score(&account, &auth) > 0);
     }
 
     #[test]
@@ -476,7 +529,7 @@ mod tests {
             last_refresh: None,
         };
 
-        assert!(account_matches_auth(&account, &auth));
+        assert!(account_auth_match_score(&account, &auth) > 0);
     }
 
     #[test]
@@ -502,6 +555,99 @@ mod tests {
             last_refresh: None,
         };
 
-        assert!(!account_matches_auth(&account, &auth));
+        assert_eq!(account_auth_match_score(&account, &auth), 0);
+    }
+
+    #[test]
+    fn keeps_current_active_account_when_multiple_accounts_match_same_auth() {
+        let first = StoredAccount::new_chatgpt(
+            "first".to_string(),
+            Some("user@example.com".to_string()),
+            None,
+            None,
+            id_token_with_email("user@example.com"),
+            "old-access-token".to_string(),
+            "old-refresh-token".to_string(),
+            None,
+        );
+        let second = StoredAccount::new_chatgpt(
+            "second".to_string(),
+            Some("user@example.com".to_string()),
+            None,
+            None,
+            "new-id-token".to_string(),
+            "new-access-token".to_string(),
+            "new-refresh-token".to_string(),
+            None,
+        );
+        let auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(TokenData {
+                id_token: "new-id-token".to_string(),
+                access_token: "new-access-token".to_string(),
+                refresh_token: "new-refresh-token".to_string(),
+                account_id: None,
+            }),
+            last_refresh: None,
+        };
+
+        let mut store = AccountsStore {
+            version: 1,
+            active_account_id: Some(second.id.clone()),
+            accounts: vec![first, second.clone()],
+            masked_account_ids: Vec::new(),
+        };
+
+        sync_active_account_from_auth(&mut store, &auth);
+
+        assert_eq!(store.active_account_id.as_deref(), Some(second.id.as_str()));
+    }
+
+    #[test]
+    fn prefers_exact_token_match_over_active_email_match() {
+        let active_email_match = StoredAccount::new_chatgpt(
+            "active-email-match".to_string(),
+            Some("user@example.com".to_string()),
+            None,
+            None,
+            "old-id-token".to_string(),
+            "old-access-token".to_string(),
+            "old-refresh-token".to_string(),
+            None,
+        );
+        let exact_token_match = StoredAccount::new_chatgpt(
+            "exact-token-match".to_string(),
+            Some("user@example.com".to_string()),
+            None,
+            None,
+            id_token_with_email("user@example.com"),
+            "current-access-token".to_string(),
+            "current-refresh-token".to_string(),
+            None,
+        );
+        let auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(TokenData {
+                id_token: id_token_with_email("user@example.com"),
+                access_token: "current-access-token".to_string(),
+                refresh_token: "current-refresh-token".to_string(),
+                account_id: None,
+            }),
+            last_refresh: None,
+        };
+
+        let mut store = AccountsStore {
+            version: 1,
+            active_account_id: Some(active_email_match.id.clone()),
+            accounts: vec![active_email_match, exact_token_match.clone()],
+            masked_account_ids: Vec::new(),
+        };
+
+        sync_active_account_from_auth(&mut store, &auth);
+
+        assert_eq!(
+            store.active_account_id.as_deref(),
+            Some(exact_token_match.id.as_str())
+        );
     }
 }

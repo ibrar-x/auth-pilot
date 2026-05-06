@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import type { AccountWithUsage } from "../types";
+import type { AccountWithUsage, UsageDisplayMode } from "../types";
 import { UsageBar } from "./UsageBar";
 
 interface AccountCardProps {
@@ -12,6 +12,7 @@ interface AccountCardProps {
   switchDisabled?: boolean;
   masked?: boolean;
   onToggleMask?: () => void;
+  usageDisplayMode?: UsageDisplayMode;
 }
 
 function formatLastRefresh(date: Date | null): string {
@@ -46,6 +47,7 @@ export function AccountCard({
   switchDisabled,
   masked = false,
   onToggleMask,
+  usageDisplayMode = "remaining",
 }: AccountCardProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(
@@ -201,7 +203,11 @@ export function AccountCard({
       </div>
 
       <div className="mb-4">
-        <UsageBar usage={account.usage} loading={isRefreshing || account.usageLoading} />
+        <UsageBar
+          usage={account.usage}
+          loading={isRefreshing || account.usageLoading}
+          displayMode={usageDisplayMode}
+        />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-5">

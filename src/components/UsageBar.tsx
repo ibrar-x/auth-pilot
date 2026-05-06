@@ -1,8 +1,9 @@
-import type { UsageInfo } from "../types";
+import type { UsageDisplayMode, UsageInfo } from "../types";
 
 interface UsageBarProps {
   usage?: UsageInfo;
   loading?: boolean;
+  displayMode?: UsageDisplayMode;
 }
 
 function formatResetTime(resetAt: number | null | undefined): string {
@@ -28,21 +29,31 @@ function RateLimitBar({
   usedPercent,
   windowMinutes,
   resetsAt,
+  displayMode,
 }: {
   label: string;
   usedPercent: number;
   windowMinutes?: number | null;
   resetsAt?: number | null;
+  displayMode: UsageDisplayMode;
 }) {
   const clampedUsed = Math.min(Math.max(usedPercent, 0), 100);
   const remaining = Math.max(0, 100 - clampedUsed);
+  const displayedPercent = displayMode === "remaining" ? remaining : clampedUsed;
+  const displayedLabel = displayMode === "remaining" ? "remaining" : "used";
 
   const colorClass =
-    clampedUsed < 70
-      ? "bg-[#10b981]"
-      : clampedUsed <= 90
-        ? "bg-[#F37338]"
-        : "bg-[#CF4500]";
+    displayMode === "remaining"
+      ? remaining > 40
+        ? "bg-[#10b981]"
+        : remaining >= 10
+          ? "bg-[#F37338]"
+          : "bg-[#CF4500]"
+      : clampedUsed < 70
+        ? "bg-[#10b981]"
+        : clampedUsed <= 90
+          ? "bg-[#F37338]"
+          : "bg-[#CF4500]";
 
   const windowLabel = formatWindowDuration(windowMinutes);
   const resetLabel = formatResetTime(resetsAt);
@@ -54,24 +65,28 @@ function RateLimitBar({
           {label} {windowLabel && <span className="text-[#D1CDC7] dark:text-[#696969]">({windowLabel})</span>}
         </span>
         <span className="text-[#141413] dark:text-[#f3f0ee] font-medium">
-          {remaining.toFixed(0)}% remaining
+          {displayedPercent.toFixed(0)}% {displayedLabel}
         </span>
       </div>
       <div className="h-2 bg-[#F3F0EE] dark:bg-[#2a2a2a] rounded-[4px] overflow-hidden">
         <div
           className={`h-full transition-all duration-500 ${colorClass}`}
-          style={{ width: `${clampedUsed}%` }}
+          style={{ width: `${displayedPercent}%` }}
         ></div>
       </div>
       <div className="flex justify-between text-[10px] text-[#D1CDC7] dark:text-[#696969]">
-        <span>{clampedUsed.toFixed(0)}% used</span>
+        <span>
+          {displayMode === "remaining"
+            ? `${clampedUsed.toFixed(0)}% used`
+            : `${remaining.toFixed(0)}% remaining`}
+        </span>
         {resetLabel && <span>Resets in {resetLabel}</span>}
       </div>
     </div>
   );
 }
 
-export function UsageBar({ usage, loading }: UsageBarProps) {
+export function UsageBar({ usage, loading, displayMode = "remaining" }: UsageBarProps) {
   if (loading && !usage) {
     return (
       <div className="space-y-2">
@@ -120,6 +135,7 @@ export function UsageBar({ usage, loading }: UsageBarProps) {
           usedPercent={usage.primary_used_percent!}
           windowMinutes={usage.primary_window_minutes}
           resetsAt={usage.primary_resets_at}
+          displayMode={displayMode}
         />
       )}
       {hasSecondary && (
@@ -128,6 +144,7 @@ export function UsageBar({ usage, loading }: UsageBarProps) {
           usedPercent={usage.secondary_used_percent!}
           windowMinutes={usage.secondary_window_minutes}
           resetsAt={usage.secondary_resets_at}
+          displayMode={displayMode}
         />
       )}
       {usage.credits_balance && (

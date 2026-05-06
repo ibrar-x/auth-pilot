@@ -9,7 +9,7 @@ use tauri::{
     AppHandle, Manager, Wry,
 };
 
-use crate::types::{MonitorState, UsageInfo};
+use crate::types::{MonitorState, UsageDisplayMode, UsageInfo};
 
 const POPUP_BLUR_GRACE_MS: i64 = 400;
 const POPUP_WIDTH: f64 = 340.0;
@@ -240,6 +240,7 @@ fn build_tray_menu(
     app: &AppHandle,
     usages: &[UsageInfo],
     store: Option<&crate::types::AccountsStore>,
+    usage_display_mode: UsageDisplayMode,
 ) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
     let active_label = if let Some(store) = store {
@@ -247,11 +248,19 @@ fn build_tray_menu(
             .active_account_id
             .as_ref()
             .and_then(|id| {
-                store
-                    .accounts
-                    .iter()
-                    .find(|a| a.id == *id)
-                    .map(|a| format!("Active: {}", a.name))
+                store.accounts.iter().find(|a| a.id == *id).map(|a| {
+                    let usage = usages.iter().find(|u| u.account_id == a.id);
+                    if let Some(usage) = usage {
+                        format!(
+                            "Active: {} — 5h: {} | 7-day: {}",
+                            a.name,
+                            format_window_percent(usage.primary_used_percent, usage_display_mode),
+                            format_window_percent(usage.secondary_used_percent, usage_display_mode)
+                        )
+                    } else {
+                        format!("Active: {}", a.name)
+                    }
+                })
             })
             .unwrap_or_else(|| "AuthPilot".to_string())
     } else {
@@ -268,17 +277,10 @@ fn build_tray_menu(
             }
             let usage = usages.iter().find(|u| u.account_id == account.id);
             let label = if let Some(u) = usage {
-                let primary = u
-                    .primary_used_percent
-                    .map(|p| format!("{:.0}%", p))
-                    .unwrap_or_else(|| "?".to_string());
-                let secondary = u
-                    .secondary_used_percent
-                    .map(|p| format!("{:.0}%", p))
-                    .unwrap_or_else(|| "?".to_string());
                 format!(
-                    "{} — 5h window: {} | 7-day: {}",
-                    account.name, primary, secondary
+                    "{} — 5h: {}",
+                    account.name,
+                    format_window_percent(u.primary_used_percent, usage_display_mode)
                 )
             } else {
                 format!("{} — loading...", account.name)
@@ -308,19 +310,52 @@ fn build_tray_menu(
     Ok(menu)
 }
 
+fn format_window_percent(
+    percent_used: Option<f64>,
+    usage_display_mode: UsageDisplayMode,
+) -> String {
+    let Some(percent_used) = percent_used else {
+        return "?".to_string();
+    };
+
+    let used = percent_used.clamp(0.0, 100.0);
+    match usage_display_mode {
+        UsageDisplayMode::Remaining => format!("{:.0}% left", 100.0 - used),
+        UsageDisplayMode::Used => format!("{used:.0}% used"),
+    }
+}
+
+pub async fn refresh_accounts_and_tray_menu(app: &AppHandle) -> anyhow::Result<()> {
+    let Some(state) = app.try_state::<Arc<RwLock<MonitorState>>>() else {
+        return Ok(());
+    };
+
+    let store = crate::auth::storage::load_accounts_with_current_active()?;
+    {
+        let mut state_guard = state.write().await;
+        state_guard.cached_accounts = Some(store);
+    }
+
+    update_tray_menu(app, state.inner())
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    Ok(())
+}
+
 async fn update_tray_menu(
     app: &AppHandle,
     state: &Arc<RwLock<MonitorState>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (usages, cached_accounts) = {
+    let (usages, cached_accounts, usage_display_mode) = {
         let state_guard = state.read().await;
         (
             state_guard.latest_usages.clone(),
             state_guard.cached_accounts.clone(),
+            state_guard.settings.usage_display_mode,
         )
     };
     if let Some(tray) = app.tray_by_id("main") {
-        let menu = build_tray_menu(app, &usages, cached_accounts.as_ref())?;
+        let menu = build_tray_menu(app, &usages, cached_accounts.as_ref(), usage_display_mode)?;
         tray.set_menu(Some(menu))?;
     }
     Ok(())

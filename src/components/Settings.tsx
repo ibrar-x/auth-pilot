@@ -31,6 +31,19 @@ const THEMES = [
   { value: "system", label: "System", icon: "⚙️" },
 ] as const;
 
+const USAGE_DISPLAY_MODES = [
+  {
+    value: "remaining",
+    label: "Remaining",
+    description: "Bars shrink as quota is used.",
+  },
+  {
+    value: "used",
+    label: "Used",
+    description: "Bars fill as quota is used.",
+  },
+] as const;
+
 export function Settings({ settings, onSave, onClose, accounts }: SettingsProps) {
   const [formSettings, setFormSettings] = useState<AppSettings>({ ...settings });
   const [saving, setSaving] = useState(false);
@@ -194,6 +207,38 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
                   }`}
                 />
               </button>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#141413] dark:text-[#f3f0ee] mb-2">
+                Usage Bars
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {USAGE_DISPLAY_MODES.map((mode) => {
+                  const isActive = (formSettings.usage_display_mode ?? "remaining") === mode.value;
+                  return (
+                    <button
+                      key={mode.value}
+                      onClick={() =>
+                        setFormSettings((prev) => ({
+                          ...prev,
+                          usage_display_mode: mode.value,
+                        }))
+                      }
+                      className={`text-left px-3 py-2.5 rounded-[4px] border transition-all ${
+                        isActive
+                          ? "bg-[#141413] dark:bg-[#f3f0ee] text-[#F3F0EE] dark:text-[#141413] border-[#141413] dark:border-[#f3f0ee]"
+                          : "bg-transparent text-[#141413] dark:text-[#f3f0ee] border-[#D1CDC7] dark:border-[#3a3a3a] hover:border-[#141413] dark:hover:border-[#f3f0ee]"
+                      }`}
+                    >
+                      <div className="text-sm font-medium">{mode.label}</div>
+                      <div className={`text-[11px] mt-1 ${isActive ? "opacity-70" : "text-[#696969] dark:text-[#9a9a9a]"}`}>
+                        {mode.description}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Cooldown */}

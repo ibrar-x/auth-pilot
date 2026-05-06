@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { invokeBackend } from "../lib/platform";
-import type { AccountInfo, UsageInfo } from "../types";
+import type { AccountInfo, AppSettings, UsageDisplayMode, UsageInfo } from "../types";
 
 interface PopupData {
   active_account: AccountInfo | null;
@@ -8,34 +8,63 @@ interface PopupData {
   usages: UsageInfo[];
 }
 
-function getUsageColor(percent: number | null | undefined): string {
-  if (percent === null || percent === undefined) return "rgba(255,255,255,0.28)";
-  if (percent < 60) return "#4ade80";
-  if (percent < 85) return "#fbbf24";
-  return "#f87171";
-}
-
-function getStatusColor(percent: number | null | undefined): string {
-  if (percent === null || percent === undefined) return "rgba(255,255,255,0.28)";
-  if (percent < 60) return "#4ade80";
-  if (percent < 85) return "#fbbf24";
-  return "#f87171";
-}
-
 function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return `${Math.round(value)}%`;
 }
 
+function clampPercent(value: number): number {
+  return Math.min(Math.max(value, 0), 100);
+}
+
+function getDisplayedPercent(
+  usedPercent: number | null | undefined,
+  displayMode: UsageDisplayMode
+): number | null {
+  if (usedPercent === null || usedPercent === undefined) return null;
+  const used = clampPercent(usedPercent);
+  return displayMode === "remaining" ? 100 - used : used;
+}
+
+function getUsageColor(
+  usedPercent: number | null | undefined,
+  displayMode: UsageDisplayMode
+): string {
+  const displayed = getDisplayedPercent(usedPercent, displayMode);
+  if (displayed === null) return "rgba(255,255,255,0.28)";
+
+  if (displayMode === "remaining") {
+    if (displayed > 40) return "#4ade80";
+    if (displayed >= 10) return "#fbbf24";
+    return "#f87171";
+  }
+
+  if (displayed < 60) return "#4ade80";
+  if (displayed < 85) return "#fbbf24";
+  return "#f87171";
+}
+
+function formatUsageDisplay(
+  usedPercent: number | null | undefined,
+  displayMode: UsageDisplayMode
+): string {
+  const displayed = getDisplayedPercent(usedPercent, displayMode);
+  if (displayed === null) return "—";
+  return `${Math.round(displayed)}% ${displayMode === "remaining" ? "left" : "used"}`;
+}
+
 function getRemainingPercent(usage: UsageInfo | undefined): number {
   if (!usage) return 100;
-  const p = usage.primary_used_percent;
-  if (p === null || p === undefined) return 100;
-  return Math.max(0, 100 - p);
+  const primary = usage.primary_used_percent;
+  const secondary = usage.secondary_used_percent;
+  if (primary === null || primary === undefined) return 0;
+  if (secondary === null || secondary === undefined) return 0;
+  return Math.max(0, Math.min(100 - primary, 100 - secondary));
 }
 
 export function TrayPopup() {
   const [data, setData] = useState<PopupData | null>(null);
+  const [usageDisplayMode, setUsageDisplayMode] = useState<UsageDisplayMode>("remaining");
   const [loading, setLoading] = useState(true);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -43,8 +72,12 @@ export function TrayPopup() {
 
   const fetchData = useCallback(async () => {
     try {
-      const result = await invokeBackend<PopupData>("get_tray_popup_data");
+      const [result, settings] = await Promise.all([
+        invokeBackend<PopupData>("get_tray_popup_data"),
+        invokeBackend<AppSettings>("get_settings").catch(() => null),
+      ]);
       setData(result);
+      setUsageDisplayMode(settings?.usage_display_mode ?? "remaining");
     } catch (err) {
       console.error("Failed to fetch popup data:", err);
     } finally {
@@ -60,6 +93,36 @@ export function TrayPopup() {
     fetchData();
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
+  }, [fetchData]);
+
+  useEffect(() => {
+    const unlisteners: Array<() => void> = [];
+    let disposed = false;
+
+    import("@tauri-apps/api/event")
+      .then(async ({ listen }) => {
+        const accountUnlisten = await listen("account-switched", () => {
+          fetchData();
+        });
+        const settingsUnlisten = await listen<AppSettings>("settings-updated", (event) => {
+          setUsageDisplayMode(event.payload.usage_display_mode ?? "remaining");
+        });
+
+        if (disposed) {
+          accountUnlisten();
+          settingsUnlisten();
+        } else {
+          unlisteners.push(accountUnlisten, settingsUnlisten);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to listen for account switch events:", err);
+      });
+
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
   }, [fetchData]);
 
   const activeUsage = useMemo(() => {
@@ -87,6 +150,18 @@ export function TrayPopup() {
     try {
       setSwitchingId(accountId);
       await invokeBackend("popup_switch_account", { accountId });
+      setData((current) => {
+        if (!current) return current;
+        const activeAccount = current.accounts.find((account) => account.id === accountId);
+        return {
+          ...current,
+          active_account: activeAccount ? { ...activeAccount, is_active: true } : current.active_account,
+          accounts: current.accounts.map((account) => ({
+            ...account,
+            is_active: account.id === accountId,
+          })),
+        };
+      });
       await fetchData();
     } catch (err) {
       console.error("Switch failed:", err);
@@ -142,15 +217,15 @@ export function TrayPopup() {
           <div style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.92)", marginBottom: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{data.active_account.name}</div>
           <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgba(255,255,255,0.28)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.03em" }}>5h <span style={{ color: "rgba(255,255,255,0.72)" }}>{formatPercent(activeUsage?.primary_used_percent)}</span></div>
+              <div style={{ fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgba(255,255,255,0.28)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.03em" }}>5h <span style={{ color: "rgba(255,255,255,0.72)" }}>{formatUsageDisplay(activeUsage?.primary_used_percent, usageDisplayMode)}</span></div>
               <div style={{ height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${activeUsage?.primary_used_percent ?? 0}%`, background: getUsageColor(activeUsage?.primary_used_percent), borderRadius: 2, transition: "width 0.3s ease" }} />
+                <div style={{ height: "100%", width: `${getDisplayedPercent(activeUsage?.primary_used_percent, usageDisplayMode) ?? 0}%`, background: getUsageColor(activeUsage?.primary_used_percent, usageDisplayMode), borderRadius: 2, transition: "width 0.3s ease" }} />
               </div>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgba(255,255,255,0.28)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.03em" }}>7d <span style={{ color: "rgba(255,255,255,0.72)" }}>{formatPercent(activeUsage?.secondary_used_percent)}</span></div>
+              <div style={{ fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgba(255,255,255,0.28)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.03em" }}>7d <span style={{ color: "rgba(255,255,255,0.72)" }}>{formatUsageDisplay(activeUsage?.secondary_used_percent, usageDisplayMode)}</span></div>
               <div style={{ height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${activeUsage?.secondary_used_percent ?? 0}%`, background: getUsageColor(activeUsage?.secondary_used_percent), borderRadius: 2, transition: "width 0.3s ease" }} />
+                <div style={{ height: "100%", width: `${getDisplayedPercent(activeUsage?.secondary_used_percent, usageDisplayMode) ?? 0}%`, background: getUsageColor(activeUsage?.secondary_used_percent, usageDisplayMode), borderRadius: 2, transition: "width 0.3s ease" }} />
               </div>
             </div>
           </div>
@@ -165,23 +240,24 @@ export function TrayPopup() {
           const isHovered = hoveredId === account.id;
           const isSwitching = switchingId === account.id;
           const isBest = account.id === bestAccountId;
-          const primary = usage?.primary_used_percent ?? null;
+          const primaryUsed = usage?.primary_used_percent;
+          const displayedPrimary = getDisplayedPercent(primaryUsed, usageDisplayMode);
 
           return (
             <div key={account.id} onMouseEnter={() => setHoveredId(account.id)} onMouseLeave={() => setHoveredId(null)} onClick={() => !isSwitching && handleSwitch(account.id)}
               style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 108px", alignItems: "center", columnGap: 12, height: 34, padding: "0 14px", margin: "3px 6px", borderRadius: 4, cursor: isSwitching ? "wait" : "pointer", background: isHovered ? "rgba(255,255,255,0.05)" : "transparent", transition: "background 0.12s ease", opacity: isSwitching ? 0.5 : 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: getStatusColor(primary), flexShrink: 0 }} />
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: getUsageColor(primaryUsed, usageDisplayMode), flexShrink: 0 }} />
                 <span style={{ fontSize: 12, color: "rgba(255,255,255,0.92)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{account.name}</span>
                 {isBest && <span style={{ fontSize: 8, fontWeight: 700, padding: "1px 6px", borderRadius: 999, background: "rgba(74,222,128,0.12)", border: "0.5px solid rgba(74,222,128,0.28)", color: "#7df29a", textTransform: "uppercase", letterSpacing: "0.06em", flexShrink: 0 }}>best</span>}
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, minWidth: 0 }}>
                 {!isHovered ? (
                   <>
-                    <div style={{ width: 64, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${primary ?? 0}%`, background: getUsageColor(primary), borderRadius: 2 }} />
+                    <div style={{ width: 54, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${displayedPrimary ?? 0}%`, background: getUsageColor(primaryUsed, usageDisplayMode), borderRadius: 2 }} />
                     </div>
-                    <span style={{ fontSize: 10, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgba(255,255,255,0.72)", width: 30, textAlign: "right" }}>{formatPercent(primary)}</span>
+                    <span style={{ fontSize: 10, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgba(255,255,255,0.72)", width: 40, textAlign: "right" }}>{formatPercent(displayedPrimary)}</span>
                   </>
                 ) : (
                   <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.28)", letterSpacing: "0.02em" }}>switch</span>

@@ -298,6 +298,7 @@ pub struct AppSettings {
     pub last_auto_switch: Option<DateTime<Utc>>,
     pub account_settings: HashMap<String, AccountSettings>,
     pub theme: String,
+    pub usage_display_mode: UsageDisplayMode,
 }
 
 impl Default for AppSettings {
@@ -310,8 +311,16 @@ impl Default for AppSettings {
             last_auto_switch: None,
             account_settings: HashMap::new(),
             theme: String::from("system"),
+            usage_display_mode: UsageDisplayMode::Remaining,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageDisplayMode {
+    Remaining,
+    Used,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

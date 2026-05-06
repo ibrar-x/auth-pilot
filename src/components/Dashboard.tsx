@@ -29,6 +29,7 @@ export function Dashboard() {
   } = useAccounts();
 
   const { settings, saveSettings } = useSettings();
+  const usageDisplayMode = settings?.usage_display_mode ?? "remaining";
   const { events: switchEvents } = useSwitchLog();
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -291,6 +292,7 @@ export function Dashboard() {
                   switching={switchingId === activeAccount.id}
                   masked={maskedAccounts.has(activeAccount.id)}
                   onToggleMask={() => toggleMask(activeAccount.id)}
+                  usageDisplayMode={usageDisplayMode}
                 />
               </section>
             )}
@@ -313,6 +315,7 @@ export function Dashboard() {
                       switching={switchingId === account.id}
                       masked={maskedAccounts.has(account.id)}
                       onToggleMask={() => toggleMask(account.id)}
+                      usageDisplayMode={usageDisplayMode}
                     />
                   ))}
                 </div>

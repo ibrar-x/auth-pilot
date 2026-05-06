@@ -47,7 +47,10 @@ export interface AppSettings {
   last_auto_switch: string | null;
   account_settings: Record<string, AccountSettings>;
   theme: "light" | "dark" | "system";
+  usage_display_mode?: UsageDisplayMode;
 }
+
+export type UsageDisplayMode = "remaining" | "used";
 
 export interface AccountSettings {
   switch_threshold: number;

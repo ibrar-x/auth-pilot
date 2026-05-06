@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter};
 #[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
-use crate::auth::storage::{get_active_account, set_active_account};
+use crate::auth::storage::{get_active_account, set_active_account, touch_account};
 use crate::process;
 use crate::session;
 use crate::switch_log;
@@ -55,6 +55,7 @@ pub async fn execute_switch(
 
     // 5. Update active account
     set_active_account(target_account_id).context("Failed to update active account")?;
+    touch_account(target_account_id).context("Failed to update account last-used timestamp")?;
 
     // 6. Log the switch
     let event = SwitchEvent {
@@ -66,7 +67,12 @@ pub async fn execute_switch(
 
     switch_log::append_switch_event(event.clone())?;
 
-    // 7. Emit events
+    // 7. Refresh tray state before notifying windows to reload.
+    if let Err(err) = crate::tray::refresh_accounts_and_tray_menu(app_handle).await {
+        tracing::warn!("Failed to refresh tray after switch: {err}");
+    }
+
+    // 8. Emit events
     let _ = app_handle.emit("account-switched", &event);
 
     tracing::info!(
