@@ -12,7 +12,7 @@ use crate::session;
 use crate::settings;
 use crate::switch_executor;
 use crate::switch_log;
-use crate::types::{AccountsStore, AppSettings, UsageInfo, SwitchReason, SwitchEvent};
+use crate::types::{AccountsStore, AppSettings, SwitchEvent, SwitchReason, UsageInfo};
 
 pub fn should_auto_switch(
     usage: &UsageInfo,
@@ -42,7 +42,7 @@ pub fn should_auto_switch(
         .unwrap_or(95.0);
 
     let over_threshold = usage.primary_used_percent.map_or(false, |p| p >= threshold);
-    
+
     if over_threshold {
         tracing::info!(
             "Account {} crossed threshold: {:.1}% >= {:.1}%",

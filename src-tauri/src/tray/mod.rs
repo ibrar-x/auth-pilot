@@ -13,10 +13,16 @@ use tauri_plugin_notification::NotificationExt;
 use crate::switch_executor;
 use crate::types::{MonitorState, SwitchReason, UsageInfo};
 
-pub fn setup_tray(app: &AppHandle, state: Arc<RwLock<MonitorState>>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setup_tray(
+    app: &AppHandle,
+    state: Arc<RwLock<MonitorState>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (usages, cached_accounts) = tauri::async_runtime::block_on(async {
         let state_guard = state.read().await;
-        (state_guard.latest_usages.clone(), state_guard.cached_accounts.clone())
+        (
+            state_guard.latest_usages.clone(),
+            state_guard.cached_accounts.clone(),
+        )
     });
     let menu = build_tray_menu(app, &usages, cached_accounts.as_ref())?;
 
@@ -52,16 +58,25 @@ pub fn setup_tray(app: &AppHandle, state: Arc<RwLock<MonitorState>>) -> Result<(
                             &account_id,
                             SwitchReason::Manual,
                             &app_handle,
-                        ).await {
+                        )
+                        .await
+                        {
                             Ok(_) => {
                                 tracing::info!("Tray switch succeeded for: {}", account_id);
                                 // Refresh tray menu to update active account
                                 if let Some(tray) = app_handle.tray_by_id("main") {
                                     let (usages, cached_accounts) = {
                                         let state_guard = state.read().await;
-                                        (state_guard.latest_usages.clone(), state_guard.cached_accounts.clone())
+                                        (
+                                            state_guard.latest_usages.clone(),
+                                            state_guard.cached_accounts.clone(),
+                                        )
                                     };
-                                    if let Ok(new_menu) = build_tray_menu(&app_handle, &usages, cached_accounts.as_ref()) {
+                                    if let Ok(new_menu) = build_tray_menu(
+                                        &app_handle,
+                                        &usages,
+                                        cached_accounts.as_ref(),
+                                    ) {
                                         let _ = tray.set_menu(Some(new_menu));
                                     }
                                 }
@@ -117,9 +132,16 @@ fn build_tray_menu(
 
     // Active account info
     let active_label = if let Some(store) = store {
-        store.active_account_id
+        store
+            .active_account_id
             .as_ref()
-            .and_then(|id| store.accounts.iter().find(|a| a.id == *id).map(|a| format!("Active: {}", a.name)))
+            .and_then(|id| {
+                store
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == *id)
+                    .map(|a| format!("Active: {}", a.name))
+            })
             .unwrap_or_else(|| "AuthPilot".to_string())
     } else {
         "AuthPilot".to_string()
@@ -138,9 +160,18 @@ fn build_tray_menu(
 
             let usage = usages.iter().find(|u| u.account_id == account.id);
             let label = if let Some(u) = usage {
-                let primary = u.primary_used_percent.map(|p| format!("{:.0}%", p)).unwrap_or_else(|| "?".to_string());
-                let secondary = u.secondary_used_percent.map(|p| format!("{:.0}%", p)).unwrap_or_else(|| "?".to_string());
-                format!("{} — 5h window: {} | 7-day: {}", account.name, primary, secondary)
+                let primary = u
+                    .primary_used_percent
+                    .map(|p| format!("{:.0}%", p))
+                    .unwrap_or_else(|| "?".to_string());
+                let secondary = u
+                    .secondary_used_percent
+                    .map(|p| format!("{:.0}%", p))
+                    .unwrap_or_else(|| "?".to_string());
+                format!(
+                    "{} — 5h window: {} | 7-day: {}",
+                    account.name, primary, secondary
+                )
             } else {
                 format!("{} — loading...", account.name)
             };
@@ -158,7 +189,13 @@ fn build_tray_menu(
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
 
-    let settings = MenuItem::with_id(app, "show_settings", "Open Dashboard...", true, None::<&str>)?;
+    let settings = MenuItem::with_id(
+        app,
+        "show_settings",
+        "Open Dashboard...",
+        true,
+        None::<&str>,
+    )?;
     menu.append(&settings)?;
 
     let quit = MenuItem::with_id(app, "quit", "Quit AuthPilot", true, None::<&str>)?;
@@ -173,7 +210,10 @@ async fn update_tray_menu(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (usages, cached_accounts) = {
         let state_guard = state.read().await;
-        (state_guard.latest_usages.clone(), state_guard.cached_accounts.clone())
+        (
+            state_guard.latest_usages.clone(),
+            state_guard.cached_accounts.clone(),
+        )
     };
 
     if let Some(tray) = app.tray_by_id("main") {
@@ -191,5 +231,3 @@ fn show_dashboard(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
-
-

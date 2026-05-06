@@ -19,12 +19,10 @@ pub async fn execute_switch(
     let previous_active = get_active_account()?.map(|a| a.id);
 
     // 1. Write auth.json
-    session::swap_active_auth(target_account_id)
-        .context("Failed to swap auth.json")?;
+    session::swap_active_auth(target_account_id).context("Failed to swap auth.json")?;
 
     // 2. Detect if Codex is running
-    let was_running = process::is_codex_desktop_running()
-        .unwrap_or(false);
+    let was_running = process::is_codex_desktop_running().unwrap_or(false);
 
     // 3. Notify user
     if was_running {
@@ -57,8 +55,7 @@ pub async fn execute_switch(
     }
 
     // 5. Update active account
-    set_active_account(target_account_id)
-        .context("Failed to update active account")?;
+    set_active_account(target_account_id).context("Failed to update active account")?;
 
     // 6. Log the switch
     let event = SwitchEvent {

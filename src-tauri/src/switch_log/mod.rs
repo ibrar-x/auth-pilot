@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 use crate::auth::storage::get_config_dir;
-use crate::types::{SwitchLog, SwitchEvent};
+use crate::types::{SwitchEvent, SwitchLog};
 
 pub fn get_switch_log_file() -> Result<PathBuf> {
     Ok(get_config_dir()?.join("switch_log.json"))
@@ -36,8 +36,7 @@ pub fn save_switch_log(log: &SwitchLog) -> Result<()> {
             .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
     }
 
-    let content = serde_json::to_string_pretty(log)
-        .context("Failed to serialize switch log")?;
+    let content = serde_json::to_string_pretty(log).context("Failed to serialize switch log")?;
 
     fs::write(&path, content)
         .with_context(|| format!("Failed to write switch log: {}", path.display()))?;

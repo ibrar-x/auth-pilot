@@ -1,7 +1,7 @@
 //! Settings commands
 
-use crate::types::AppSettings;
 use crate::settings;
+use crate::types::AppSettings;
 
 #[tauri::command]
 pub async fn get_settings() -> Result<AppSettings, String> {

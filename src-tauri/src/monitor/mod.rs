@@ -17,7 +17,7 @@ static MONITOR_CANCELLED: AtomicBool = AtomicBool::new(false);
 pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
     tauri::async_runtime::spawn(async move {
         MONITOR_CANCELLED.store(false, Ordering::Relaxed);
-        
+
         {
             let mut state_guard = state.write().await;
             state_guard.is_monitor_running = true;
@@ -57,17 +57,19 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                         if let Some(usage) = usages.iter().find(|u| u.account_id == active_id) {
                             let should_switch = {
                                 let state_guard = state.read().await;
-                                auto_switch::should_auto_switch(usage, &state_guard.settings, &store)
+                                auto_switch::should_auto_switch(
+                                    usage,
+                                    &state_guard.settings,
+                                    &store,
+                                )
                             };
 
                             drop(store);
-                            
+
                             if should_switch {
-                                if let Err(e) = auto_switch::trigger(
-                                    active_id,
-                                    &app_handle,
-                                    &state,
-                                ).await {
+                                if let Err(e) =
+                                    auto_switch::trigger(active_id, &app_handle, &state).await
+                                {
                                     tracing::error!("Auto-switch failed: {}", e);
                                 }
                             }

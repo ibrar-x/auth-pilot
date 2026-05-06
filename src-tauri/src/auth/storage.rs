@@ -21,51 +21,71 @@ pub fn get_legacy_config_dir() -> Result<PathBuf> {
 pub fn migrate_legacy_accounts() -> Result<bool> {
     let legacy_dir = get_legacy_config_dir()?;
     let legacy_file = legacy_dir.join("accounts.json");
-    
+
     if !legacy_file.exists() {
         return Ok(false); // No legacy data to migrate
     }
-    
+
     let new_dir = get_config_dir()?;
     let new_file = new_dir.join("accounts.json");
-    
+
     // Only migrate if new file doesn't exist yet
     if new_file.exists() {
         return Ok(false);
     }
-    
+
     // Read legacy file (may be plain JSON or encrypted)
-    let content = fs::read_to_string(&legacy_file)
-        .with_context(|| format!("Failed to read legacy accounts file: {}", legacy_file.display()))?;
-    
+    let content = fs::read_to_string(&legacy_file).with_context(|| {
+        format!(
+            "Failed to read legacy accounts file: {}",
+            legacy_file.display()
+        )
+    })?;
+
     // Try to parse as encrypted blob first
     let store: AccountsStore = if let Ok(blob) = serde_json::from_str::<EncryptedBlob>(&content) {
-        let machine_id = get_machine_id().context("Failed to get machine ID for legacy migration")?;
+        let machine_id =
+            get_machine_id().context("Failed to get machine ID for legacy migration")?;
         let plaintext = decrypt(&blob, &machine_id)
             .with_context(|| "Failed to decrypt legacy accounts file")?;
         serde_json::from_str(&plaintext)
             .context("Failed to parse decrypted legacy accounts file")?
     } else {
         // Plain JSON
-        serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse legacy accounts file: {}", legacy_file.display()))?
+        serde_json::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse legacy accounts file: {}",
+                legacy_file.display()
+            )
+        })?
     };
-    
+
     // Create new config directory
-    fs::create_dir_all(&new_dir)
-        .with_context(|| format!("Failed to create new config directory: {}", new_dir.display()))?;
-    
+    fs::create_dir_all(&new_dir).with_context(|| {
+        format!(
+            "Failed to create new config directory: {}",
+            new_dir.display()
+        )
+    })?;
+
     // Save to new location (will be encrypted automatically)
     save_accounts(&store)?;
-    
+
     // Create auth.json snapshots for all migrated accounts
     for account in &store.accounts {
         if let Err(e) = crate::session::snapshot_account_from_data(account) {
-            tracing::warn!("Failed to create snapshot for migrated account {}: {}", account.id, e);
+            tracing::warn!(
+                "Failed to create snapshot for migrated account {}: {}",
+                account.id,
+                e
+            );
         }
     }
-    
-    tracing::info!("Migrated {} accounts from legacy ~/.codex-switcher/ to ~/.authpilot/", store.accounts.len());
+
+    tracing::info!(
+        "Migrated {} accounts from legacy ~/.codex-switcher/ to ~/.authpilot/",
+        store.accounts.len()
+    );
     Ok(true)
 }
 
@@ -95,12 +115,14 @@ pub fn load_accounts() -> Result<AccountsStore> {
         }
 
         // 2. Fallback: try the raw computed ID (for data encrypted before persistence was added)
-        let computed_id = crate::crypto::compute_machine_id()
-            .context("Failed to compute machine ID fallback")?;
+        let computed_id =
+            crate::crypto::compute_machine_id().context("Failed to compute machine ID fallback")?;
         if let Ok(plaintext) = decrypt(&blob, &computed_id) {
             let store: AccountsStore = serde_json::from_str(&plaintext)
                 .context("Failed to parse decrypted accounts file")?;
-            tracing::info!("Recovered accounts using computed machine ID; re-encrypting with persisted ID");
+            tracing::info!(
+                "Recovered accounts using computed machine ID; re-encrypting with persisted ID"
+            );
             let _ = save_accounts(&store); // Re-save with stable ID
             return Ok(store);
         }

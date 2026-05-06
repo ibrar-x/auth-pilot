@@ -56,22 +56,20 @@ struct AccountsCheckEntitlement {
 
 pub async fn get_account_usage(account: &StoredAccount) -> Result<UsageInfo> {
     match &account.auth_data {
-        AuthData::ApiKey { .. } => {
-            Ok(UsageInfo {
-                account_id: account.id.clone(),
-                plan_type: Some("api_key".to_string()),
-                primary_used_percent: None,
-                primary_window_minutes: None,
-                primary_resets_at: None,
-                secondary_used_percent: None,
-                secondary_window_minutes: None,
-                secondary_resets_at: None,
-                has_credits: None,
-                unlimited_credits: None,
-                credits_balance: None,
-                error: Some("Usage info not available for API key accounts".to_string()),
-            })
-        }
+        AuthData::ApiKey { .. } => Ok(UsageInfo {
+            account_id: account.id.clone(),
+            plan_type: Some("api_key".to_string()),
+            primary_used_percent: None,
+            primary_window_minutes: None,
+            primary_resets_at: None,
+            secondary_used_percent: None,
+            secondary_window_minutes: None,
+            secondary_resets_at: None,
+            has_credits: None,
+            unlimited_credits: None,
+            credits_balance: None,
+            error: Some("Usage info not available for API key accounts".to_string()),
+        }),
         AuthData::ChatGPT { .. } => get_usage_with_chatgpt_auth(account).await,
     }
 }

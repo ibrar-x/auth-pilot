@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
-use crate::types::{AppSettings, AccountSettings};
 use crate::auth::storage::get_config_dir;
+use crate::types::{AccountSettings, AppSettings};
 
 pub fn get_settings_file() -> Result<PathBuf> {
     Ok(get_config_dir()?.join("settings.json"))
@@ -37,8 +37,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<()> {
             .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
     }
 
-    let content = serde_json::to_string_pretty(settings)
-        .context("Failed to serialize settings")?;
+    let content = serde_json::to_string_pretty(settings).context("Failed to serialize settings")?;
 
     fs::write(&path, content)
         .with_context(|| format!("Failed to write settings file: {}", path.display()))?;
@@ -64,7 +63,9 @@ pub fn get_account_settings(account_id: &str) -> Result<AccountSettings> {
 
 pub fn update_account_settings(account_id: &str, account_settings: AccountSettings) -> Result<()> {
     let mut settings = load_settings()?;
-    settings.account_settings.insert(account_id.to_string(), account_settings);
+    settings
+        .account_settings
+        .insert(account_id.to_string(), account_settings);
     save_settings(&settings)
 }
 

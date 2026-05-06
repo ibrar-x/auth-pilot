@@ -30,9 +30,7 @@ pub fn compute_machine_id() -> Result<String> {
             .output()
         {
             Ok(output) if output.status.success() => {
-                let uuid = String::from_utf8_lossy(&output.stdout)
-                    .trim()
-                    .to_string();
+                let uuid = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !uuid.is_empty() {
                     return Ok(uuid);
                 }
@@ -98,11 +96,11 @@ pub fn derive_key(salt: &[u8], machine_id: &str) -> [u8; 32] {
 }
 
 pub fn encrypt(plaintext: &str, machine_id: &str) -> Result<EncryptedBlob> {
-    use chacha20poly1305::{
-        XChaCha20Poly1305,
-        aead::{Aead, KeyInit},
-    };
     use chacha20poly1305::aead::generic_array::GenericArray;
+    use chacha20poly1305::{
+        aead::{Aead, KeyInit},
+        XChaCha20Poly1305,
+    };
 
     let mut salt = [0u8; 16];
     let mut nonce = [0u8; 24];
@@ -126,11 +124,11 @@ pub fn encrypt(plaintext: &str, machine_id: &str) -> Result<EncryptedBlob> {
 }
 
 pub fn decrypt(blob: &EncryptedBlob, machine_id: &str) -> Result<String> {
-    use chacha20poly1305::{
-        XChaCha20Poly1305,
-        aead::{Aead, KeyInit},
-    };
     use chacha20poly1305::aead::generic_array::GenericArray;
+    use chacha20poly1305::{
+        aead::{Aead, KeyInit},
+        XChaCha20Poly1305,
+    };
 
     let salt = base64::engine::general_purpose::STANDARD
         .decode(&blob.salt)

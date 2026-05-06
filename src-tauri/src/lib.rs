@@ -2,9 +2,9 @@
 
 pub mod api;
 pub mod auth;
+pub mod auto_switch;
 pub mod commands;
 pub mod crypto;
-pub mod auto_switch;
 pub mod monitor;
 pub mod process;
 pub mod session;
@@ -15,18 +15,17 @@ pub mod tray;
 pub mod types;
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tauri::Manager;
+use tokio::sync::RwLock;
 
 use commands::{
-    add_account_from_file, cancel_login, complete_login, delete_account,
-    ensure_file_auth_mode, export_accounts_full_encrypted_file, export_accounts_slim_text,
-    export_settings,
-    get_active_account_info, get_masked_account_ids, get_settings, get_switch_log,
-    get_usage, import_accounts_full_encrypted_file, import_accounts_slim_text,
-    is_file_auth_mode_required, list_accounts, manual_switch_account, refresh_account_metadata,
-    refresh_all_accounts_usage, rename_account, save_settings, set_masked_account_ids,
-    start_login, switch_account, warmup_account, warmup_all_accounts,
+    add_account_from_file, cancel_login, complete_login, delete_account, ensure_file_auth_mode,
+    export_accounts_full_encrypted_file, export_accounts_slim_text, export_settings,
+    get_active_account_info, get_masked_account_ids, get_settings, get_switch_log, get_usage,
+    import_accounts_full_encrypted_file, import_accounts_slim_text, is_file_auth_mode_required,
+    list_accounts, manual_switch_account, refresh_account_metadata, refresh_all_accounts_usage,
+    rename_account, save_settings, set_masked_account_ids, start_login, switch_account,
+    warmup_account, warmup_all_accounts,
 };
 use types::MonitorState;
 
@@ -136,11 +135,7 @@ fn setup_logging() {
         .map(|h| h.join(".authpilot"))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    let file_appender = RollingFileAppender::new(
-        Rotation::DAILY,
-        config_dir,
-        "switcher.log",
-    );
+    let file_appender = RollingFileAppender::new(Rotation::DAILY, config_dir, "switcher.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     // Leak the guard so the background writer thread stays alive for the program lifetime

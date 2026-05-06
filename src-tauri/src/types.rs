@@ -1,8 +1,8 @@
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountsStore {
@@ -92,7 +92,9 @@ pub enum AuthMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthData {
-    ApiKey { key: String },
+    ApiKey {
+        key: String,
+    },
     ChatGPT {
         id_token: String,
         access_token: String,

@@ -92,7 +92,11 @@ pub async fn add_account_from_file(path: String, name: String) -> Result<Account
 
     // Create auth.json snapshot for the new account
     if let Err(e) = crate::session::snapshot_account_from_data(&stored) {
-        tracing::warn!("Failed to create snapshot for new account {}: {}", stored.id, e);
+        tracing::warn!(
+            "Failed to create snapshot for new account {}: {}",
+            stored.id,
+            e
+        );
     }
 
     let store = load_accounts().map_err(|e| e.to_string())?;
@@ -161,9 +165,7 @@ pub async fn import_accounts_slim_text(payload: String) -> Result<ImportAccounts
     let imported = build_store_from_slim_payload(slim_payload, &existing_names)
         .await
         .map_err(|e| {
-            format!(
-                "{e:#}\nHint: Slim import needs network access to refresh ChatGPT tokens."
-            )
+            format!("{e:#}\nHint: Slim import needs network access to refresh ChatGPT tokens.")
         })?;
     validate_imported_store(&imported).map_err(|e| format!("{e:#}"))?;
 
@@ -386,13 +388,14 @@ async fn restore_slim_accounts(
                 let refresh_token = entry
                     .refresh_token
                     .context("Refresh token payload is missing")?;
-                crate::auth::create_chatgpt_account_from_refresh_token(account_name.clone(), refresh_token)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "Failed to restore ChatGPT account `{account_name}` from refresh token"
-                        )
-                    })?
+                crate::auth::create_chatgpt_account_from_refresh_token(
+                    account_name.clone(),
+                    refresh_token,
+                )
+                .await
+                .with_context(|| {
+                    format!("Failed to restore ChatGPT account `{account_name}` from refresh token")
+                })?
             }
             _ => anyhow::bail!("Unsupported auth type in slim payload"),
         };

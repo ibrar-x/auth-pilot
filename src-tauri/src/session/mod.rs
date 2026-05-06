@@ -5,10 +5,10 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use base64::Engine;
 use crate::auth::storage::{get_account, get_config_dir};
 use crate::auth::switcher::{get_codex_auth_file, get_codex_home};
 use crate::types::{AuthData, AuthDotJson, StoredAccount, TokenData};
+use base64::Engine;
 
 pub fn get_account_snapshot_dir(account_id: &str) -> Result<PathBuf> {
     Ok(get_config_dir()?.join("accounts").join(account_id))
@@ -20,8 +20,8 @@ pub fn snapshot_account(account_id: &str, auth_json: &AuthDotJson) -> Result<()>
         .with_context(|| format!("Failed to create snapshot dir: {}", dir.display()))?;
 
     let path = dir.join("auth.json");
-    let content = serde_json::to_string_pretty(auth_json)
-        .context("Failed to serialize auth snapshot")?;
+    let content =
+        serde_json::to_string_pretty(auth_json).context("Failed to serialize auth snapshot")?;
 
     fs::write(&path, content)
         .with_context(|| format!("Failed to write auth snapshot: {}", path.display()))?;
@@ -45,7 +45,10 @@ pub fn restore_account(account_id: &str) -> Result<AuthDotJson> {
         // Fallback: try to create snapshot from account data
         if let Ok(account) = get_account(account_id) {
             if let Some(account) = account {
-                tracing::info!("Creating missing snapshot for account {} from stored auth_data", account_id);
+                tracing::info!(
+                    "Creating missing snapshot for account {} from stored auth_data",
+                    account_id
+                );
                 snapshot_account_from_data(&account)?;
                 return restore_account(account_id);
             }
@@ -101,8 +104,8 @@ pub fn swap_active_auth(account_id: &str) -> Result<()> {
     fs::create_dir_all(&codex_home)
         .with_context(|| format!("Failed to create codex home: {}", codex_home.display()))?;
 
-    let content = serde_json::to_string_pretty(&snapshot)
-        .context("Failed to serialize auth.json")?;
+    let content =
+        serde_json::to_string_pretty(&snapshot).context("Failed to serialize auth.json")?;
 
     // Atomic write using temp file + rename
     let tmp_path = auth_path.with_extension("tmp");
@@ -129,26 +132,30 @@ pub fn ensure_file_auth_mode() -> Result<bool> {
     let mut config = if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .with_context(|| format!("Failed to read config.toml: {}", config_path.display()))?;
-        content.parse::<toml::Table>()
+        content
+            .parse::<toml::Table>()
             .unwrap_or_else(|_| toml::Table::new())
     } else {
         toml::Table::new()
     };
 
-    let current = config.get("cli_auth_credentials_store")
+    let current = config
+        .get("cli_auth_credentials_store")
         .and_then(|v| v.as_str());
 
     if current == Some("file") {
         return Ok(false);
     }
 
-    config.insert("cli_auth_credentials_store".to_string(), toml::Value::String("file".to_string()));
+    config.insert(
+        "cli_auth_credentials_store".to_string(),
+        toml::Value::String("file".to_string()),
+    );
 
     fs::create_dir_all(&codex_home)
         .with_context(|| format!("Failed to create codex home: {}", codex_home.display()))?;
 
-    let content = toml::to_string_pretty(&config)
-        .context("Failed to serialize config.toml")?;
+    let content = toml::to_string_pretty(&config).context("Failed to serialize config.toml")?;
 
     fs::write(&config_path, content)
         .with_context(|| format!("Failed to write config.toml: {}", config_path.display()))?;
@@ -168,10 +175,12 @@ pub fn is_file_auth_mode_required() -> Result<bool> {
     let content = fs::read_to_string(&config_path)
         .with_context(|| format!("Failed to read config.toml: {}", config_path.display()))?;
 
-    let config = content.parse::<toml::Table>()
+    let config = content
+        .parse::<toml::Table>()
         .unwrap_or_else(|_| toml::Table::new());
 
-    let current = config.get("cli_auth_credentials_store")
+    let current = config
+        .get("cli_auth_credentials_store")
         .and_then(|v| v.as_str());
 
     Ok(current != Some("file"))
@@ -179,12 +188,10 @@ pub fn is_file_auth_mode_required() -> Result<bool> {
 
 pub fn is_token_expired(auth_json: &AuthDotJson) -> bool {
     match &auth_json.tokens {
-        Some(tokens) => {
-            match parse_jwt_exp(&tokens.access_token) {
-                Some(exp) => exp <= chrono::Utc::now().timestamp() + 60,
-                None => false,
-            }
-        }
+        Some(tokens) => match parse_jwt_exp(&tokens.access_token) {
+            Some(exp) => exp <= chrono::Utc::now().timestamp() + 60,
+            None => false,
+        },
         None => false,
     }
 }

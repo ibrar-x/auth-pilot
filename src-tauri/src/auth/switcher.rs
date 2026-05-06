@@ -81,7 +81,10 @@ pub fn import_from_auth_json(path: &str, account_name: String) -> Result<StoredA
         .with_context(|| format!("Failed to parse auth.json: {path}"))
 }
 
-pub fn import_from_auth_json_contents(content: &str, account_name: String) -> Result<StoredAccount> {
+pub fn import_from_auth_json_contents(
+    content: &str,
+    account_name: String,
+) -> Result<StoredAccount> {
     let auth: AuthDotJson =
         serde_json::from_str(content).context("Failed to parse auth.json contents")?;
 
