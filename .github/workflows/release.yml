@@ -82,10 +82,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macOS universal
+          - label: macOS Apple Silicon
             platform: macos-latest
-            rustTargets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --target universal-apple-darwin
+            rustTargets: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - label: macOS Intel
+            platform: macos-latest
+            rustTargets: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
           - label: Windows x64
             platform: windows-latest
             rustTargets: ""
@@ -151,7 +155,7 @@ jobs:
         with:
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: "AuthPilot ${{ env.RELEASE_TAG }}"
-          releaseBody: "Download the installer for your platform from the assets below."
+          releaseBody: "Download the installer for your platform from the assets below. Use Apple Silicon for M-series Macs and Intel for older Macs."
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

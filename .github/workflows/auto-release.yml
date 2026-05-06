@@ -1,0 +1,85 @@
+name: Auto Release v0.1
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Test
+      - Build
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: auto-release-v0.1-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: v0.1
+  REQUIRED_WORKFLOWS: CI,Test,Build
+
+jobs:
+  dispatch-release:
+    name: Dispatch v0.1 Release
+    runs-on: ubuntu-22.04
+    if: >-
+      ${{
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.conclusion == 'success'
+      }}
+    steps:
+      - name: Gate and start release workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          IFS=',' read -r -a workflows <<< "$REQUIRED_WORKFLOWS"
+
+          for workflow in "${workflows[@]}"; do
+            run_json="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "$workflow" \
+              --branch main \
+              --commit "$HEAD_SHA" \
+              --event push \
+              --json conclusion,status,url \
+              --jq 'map(select(.status == "completed")) | first // empty')"
+
+            if [ -z "$run_json" ]; then
+              echo "$workflow has not completed for $HEAD_SHA yet."
+              exit 0
+            fi
+
+            conclusion="$(jq -r '.conclusion' <<< "$run_json")"
+            url="$(jq -r '.url' <<< "$run_json")"
+
+            if [ "$conclusion" != "success" ]; then
+              echo "$workflow completed with $conclusion for $HEAD_SHA: $url"
+              exit 0
+            fi
+
+            echo "$workflow passed for $HEAD_SHA: $url"
+          done
+
+          existing="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow "Release Desktop Apps" \
+            --branch main \
+            --commit "$HEAD_SHA" \
+            --event workflow_dispatch \
+            --json conclusion,status,url \
+            --jq 'map(select(.status != "completed" or .conclusion == "success")) | first // empty')"
+
+          if [ -n "$existing" ]; then
+            echo "A release workflow already exists for $HEAD_SHA:"
+            jq -r '.url' <<< "$existing"
+            exit 0
+          fi
+
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$RELEASE_TAG"
