@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use tauri::{AppHandle, Emitter};
+#[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
 use crate::auth::storage::{get_active_account, set_active_account};
@@ -27,16 +28,14 @@ pub async fn execute_switch(
     // 3. Notify user
     if was_running {
         if let Ok(account) = crate::auth::storage::get_account(target_account_id) {
+            #[cfg(target_os = "macos")]
             if let Some(name) = account.map(|a| a.name) {
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = app_handle
-                        .notification()
-                        .builder()
-                        .title("Switching Codex Account")
-                        .body(format!("Switching to {} — Codex will restart", name))
-                        .show();
-                }
+                let _ = app_handle
+                    .notification()
+                    .builder()
+                    .title("Switching Codex Account")
+                    .body(format!("Switching to {} — Codex will restart", name))
+                    .show();
             }
         }
     }

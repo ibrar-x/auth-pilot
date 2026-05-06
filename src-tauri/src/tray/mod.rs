@@ -8,6 +8,7 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Manager, Wry,
 };
+#[cfg(target_os = "macos")]
 use tauri_plugin_notification::NotificationExt;
 
 use crate::switch_executor;
