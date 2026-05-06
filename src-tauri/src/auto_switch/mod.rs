@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use tauri::{AppHandle, Emitter};
 
-use crate::auth::storage::load_accounts;
+use crate::auth::storage::load_accounts_with_current_active;
 use crate::session;
 use crate::settings;
 use crate::switch_executor;
@@ -62,7 +62,7 @@ pub async fn trigger(
 ) -> Result<()> {
     tracing::info!("Auto-switch triggered for account {}", active_account_id);
 
-    let store = load_accounts()?;
+    let store = load_accounts_with_current_active()?;
     let usages = {
         let state_guard = state.read().await;
         state_guard.latest_usages.clone()

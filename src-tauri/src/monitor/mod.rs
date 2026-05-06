@@ -8,7 +8,7 @@ use tokio::time::{sleep, Duration};
 use tauri::{AppHandle, Emitter};
 
 use crate::api::usage::refresh_all_usage;
-use crate::auth::storage::load_accounts;
+use crate::auth::storage::load_accounts_with_current_active;
 use crate::auto_switch;
 use crate::types::MonitorState;
 
@@ -36,7 +36,7 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                 state_guard.settings.poll_interval_seconds
             };
 
-            match load_accounts() {
+            match load_accounts_with_current_active() {
                 Ok(store) => {
                     {
                         let mut state_guard = state.write().await;

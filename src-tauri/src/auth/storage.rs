@@ -5,7 +5,9 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
 use crate::crypto::{decrypt, encrypt, get_machine_id, EncryptedBlob};
-use crate::types::{AccountsStore, AuthData, StoredAccount};
+use crate::types::{
+    parse_chatgpt_id_token_claims, AccountsStore, AuthData, AuthDotJson, StoredAccount,
+};
 
 pub fn get_config_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Could not find home directory")?;
@@ -137,6 +139,89 @@ pub fn load_accounts() -> Result<AccountsStore> {
     Ok(store)
 }
 
+pub fn load_accounts_with_current_active() -> Result<AccountsStore> {
+    let mut store = load_accounts()?;
+    sync_active_account_from_current_auth(&mut store)?;
+    Ok(store)
+}
+
+pub fn sync_active_account_from_current_auth(store: &mut AccountsStore) -> Result<Option<String>> {
+    let auth = match crate::auth::switcher::read_current_auth()? {
+        Some(auth) => auth,
+        None => return Ok(store.active_account_id.clone()),
+    };
+
+    let resolved_id = store
+        .accounts
+        .iter()
+        .find(|account| account_matches_auth(account, &auth))
+        .map(|account| account.id.clone());
+
+    if let Some(resolved_id) = resolved_id {
+        if store.active_account_id.as_deref() != Some(resolved_id.as_str()) {
+            store.active_account_id = Some(resolved_id.clone());
+            save_accounts(store)?;
+        }
+        return Ok(Some(resolved_id));
+    }
+
+    Ok(store.active_account_id.clone())
+}
+
+fn account_matches_auth(account: &StoredAccount, auth: &AuthDotJson) -> bool {
+    match (&account.auth_data, auth) {
+        (
+            AuthData::ApiKey { key },
+            AuthDotJson {
+                openai_api_key: Some(current_key),
+                ..
+            },
+        ) => key == current_key,
+        (
+            AuthData::ChatGPT {
+                id_token,
+                access_token,
+                refresh_token,
+                account_id,
+            },
+            AuthDotJson {
+                tokens: Some(current_tokens),
+                ..
+            },
+        ) => {
+            if access_token == &current_tokens.access_token
+                || refresh_token == &current_tokens.refresh_token
+                || id_token == &current_tokens.id_token
+            {
+                return true;
+            }
+
+            let stored_claims = parse_chatgpt_id_token_claims(id_token);
+            let current_claims = parse_chatgpt_id_token_claims(&current_tokens.id_token);
+
+            let stored_account_id = account_id
+                .as_deref()
+                .or(stored_claims.account_id.as_deref());
+            let current_account_id = current_tokens
+                .account_id
+                .as_deref()
+                .or(current_claims.account_id.as_deref());
+
+            if stored_account_id.is_some() && stored_account_id == current_account_id {
+                return true;
+            }
+
+            let stored_email = account.email.as_deref().or(stored_claims.email.as_deref());
+            let current_email = current_claims.email.as_deref();
+            stored_account_id.is_none()
+                && current_account_id.is_none()
+                && stored_email.is_some()
+                && stored_email == current_email
+        }
+        _ => false,
+    }
+}
+
 pub fn save_accounts(store: &AccountsStore) -> Result<()> {
     let path = get_accounts_file()?;
 
@@ -219,7 +304,7 @@ pub fn get_account(account_id: &str) -> Result<Option<StoredAccount>> {
 }
 
 pub fn get_active_account() -> Result<Option<StoredAccount>> {
-    let store = load_accounts()?;
+    let store = load_accounts_with_current_active()?;
     let active_id = match &store.active_account_id {
         Some(id) => id,
         None => return Ok(None),
@@ -349,4 +434,74 @@ pub fn set_masked_account_ids(ids: Vec<String>) -> Result<()> {
     store.masked_account_ids = ids;
     save_accounts(&store)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::TokenData;
+
+    #[test]
+    fn matches_api_key_auth_to_stored_account() {
+        let account = StoredAccount::new_api_key("api".to_string(), "sk-test".to_string());
+        let auth = AuthDotJson {
+            openai_api_key: Some("sk-test".to_string()),
+            tokens: None,
+            last_refresh: None,
+        };
+
+        assert!(account_matches_auth(&account, &auth));
+    }
+
+    #[test]
+    fn matches_chatgpt_auth_by_account_id_after_tokens_change() {
+        let account = StoredAccount::new_chatgpt(
+            "chatgpt".to_string(),
+            Some("user@example.com".to_string()),
+            None,
+            None,
+            "old-id-token".to_string(),
+            "old-access-token".to_string(),
+            "old-refresh-token".to_string(),
+            Some("acc_123".to_string()),
+        );
+        let auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(TokenData {
+                id_token: "new-id-token".to_string(),
+                access_token: "new-access-token".to_string(),
+                refresh_token: "new-refresh-token".to_string(),
+                account_id: Some("acc_123".to_string()),
+            }),
+            last_refresh: None,
+        };
+
+        assert!(account_matches_auth(&account, &auth));
+    }
+
+    #[test]
+    fn does_not_match_different_chatgpt_account_id() {
+        let account = StoredAccount::new_chatgpt(
+            "chatgpt".to_string(),
+            Some("user@example.com".to_string()),
+            None,
+            None,
+            "old-id-token".to_string(),
+            "old-access-token".to_string(),
+            "old-refresh-token".to_string(),
+            Some("acc_123".to_string()),
+        );
+        let auth = AuthDotJson {
+            openai_api_key: None,
+            tokens: Some(TokenData {
+                id_token: "new-id-token".to_string(),
+                access_token: "new-access-token".to_string(),
+                refresh_token: "new-refresh-token".to_string(),
+                account_id: Some("acc_456".to_string()),
+            }),
+            last_refresh: None,
+        };
+
+        assert!(!account_matches_auth(&account, &auth));
+    }
 }

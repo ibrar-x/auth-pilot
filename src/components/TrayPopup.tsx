@@ -39,6 +39,7 @@ export function TrayPopup() {
   const [loading, setLoading] = useState(true);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -98,9 +99,16 @@ export function TrayPopup() {
     invokeBackend("show_main_window").catch(() => {});
   };
 
-  const handleRefresh = () => {
-    invokeBackend("refresh_all_accounts_usage").catch(() => {});
-    fetchData();
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await invokeBackend("refresh_all_accounts_usage");
+      await fetchData();
+    } catch (err) {
+      console.error("Refresh failed:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const handleQuit = () => {
@@ -108,7 +116,7 @@ export function TrayPopup() {
   };
 
   const handleOpenSettings = () => {
-    invokeBackend("show_main_window").catch(() => {});
+    invokeBackend("open_settings").catch(() => {});
   };
 
   if (loading || !data) {
@@ -189,20 +197,20 @@ export function TrayPopup() {
       <div style={{ display: "flex", padding: "6px 8px", gap: 2, flexShrink: 0 }}>
         <FooterButton icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></svg>} shortcut="D" onClick={handleOpenDashboard} title="Dashboard" />
         <FooterButton icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>} shortcut="," onClick={handleOpenSettings} title="Settings" />
-        <FooterButton icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" /></svg>} onClick={handleRefresh} title="Refresh" />
+        <FooterButton icon={isRefreshing ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 0.8s linear infinite" }}><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" /></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" /></svg>} onClick={handleRefresh} title="Refresh" disabled={isRefreshing} />
         <FooterButton icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>} onClick={handleQuit} danger title="Quit" />
       </div>
 
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
 
-function FooterButton({ icon, shortcut, onClick, danger, title }: { icon: React.ReactNode; shortcut?: string; onClick: () => void; danger?: boolean; title: string }) {
+function FooterButton({ icon, shortcut, onClick, danger, title, disabled }: { icon: React.ReactNode; shortcut?: string; onClick: () => void; danger?: boolean; title: string; disabled?: boolean }) {
   const [hovered, setHovered] = useState(false);
   return (
-    <button onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick} title={title}
-      style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, height: 36, borderRadius: 4, border: "none", background: hovered ? (danger ? "rgba(248,113,113,0.12)" : "rgba(255,255,255,0.06)") : "transparent", color: hovered ? (danger ? "#f87171" : "rgba(255,255,255,0.92)") : "rgba(255,255,255,0.72)", cursor: "pointer", transition: "all 0.12s ease", padding: 0 }}>
+    <button onMouseEnter={() => !disabled && setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={onClick} title={title} disabled={disabled}
+      style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, height: 36, borderRadius: 4, border: "none", background: hovered && !disabled ? (danger ? "rgba(248,113,113,0.12)" : "rgba(255,255,255,0.06)") : "transparent", color: hovered && !disabled ? (danger ? "#f87171" : "rgba(255,255,255,0.92)") : disabled ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.72)", cursor: disabled ? "not-allowed" : "pointer", transition: "all 0.12s ease", padding: 0 }}>
       {icon}
       {shortcut && <span style={{ fontSize: 9, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgba(255,255,255,0.28)" }}>{shortcut}</span>}
     </button>

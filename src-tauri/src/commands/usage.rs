@@ -1,7 +1,10 @@
 //! Usage query Tauri commands
 
 use crate::api::usage::{fetch_chatgpt_account_metadata, get_account_usage, refresh_all_usage};
-use crate::auth::{get_account, load_accounts, refresh_chatgpt_tokens, update_account_metadata};
+use crate::auth::{
+    get_account, load_accounts, load_accounts_with_current_active, refresh_chatgpt_tokens,
+    update_account_metadata,
+};
 use crate::types::{AccountInfo, AuthData, UsageInfo, WarmupSummary};
 use futures::{stream, StreamExt};
 
@@ -41,7 +44,7 @@ pub async fn refresh_account_metadata(account_id: String) -> Result<AccountInfo,
         }
     };
 
-    let store = load_accounts().map_err(|e| e.to_string())?;
+    let store = load_accounts_with_current_active().map_err(|e| e.to_string())?;
     let active_id = store.active_account_id.as_deref();
     Ok(AccountInfo::from_stored(&updated, active_id))
 }

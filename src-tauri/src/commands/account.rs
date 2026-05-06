@@ -2,7 +2,8 @@
 
 use crate::auth::{
     add_account, get_active_account, import_from_auth_json, import_from_auth_json_contents,
-    load_accounts, remove_account, save_accounts, set_active_account, touch_account,
+    load_accounts, load_accounts_with_current_active, remove_account, save_accounts,
+    set_active_account, touch_account,
 };
 use crate::types::{AccountInfo, AccountsStore, AuthData, ImportAccountsSummary, StoredAccount};
 
@@ -61,7 +62,7 @@ struct SlimAccountPayload {
 
 #[tauri::command]
 pub async fn list_accounts() -> Result<Vec<AccountInfo>, String> {
-    let store = load_accounts().map_err(|e| e.to_string())?;
+    let store = load_accounts_with_current_active().map_err(|e| e.to_string())?;
     let active_id = store.active_account_id.as_deref();
 
     let accounts: Vec<AccountInfo> = store
@@ -75,7 +76,7 @@ pub async fn list_accounts() -> Result<Vec<AccountInfo>, String> {
 
 #[tauri::command]
 pub async fn get_active_account_info() -> Result<Option<AccountInfo>, String> {
-    let store = load_accounts().map_err(|e| e.to_string())?;
+    let store = load_accounts_with_current_active().map_err(|e| e.to_string())?;
     let active_id = store.active_account_id.as_deref();
 
     if let Some(active) = get_active_account().map_err(|e| e.to_string())? {
@@ -99,7 +100,7 @@ pub async fn add_account_from_file(path: String, name: String) -> Result<Account
         );
     }
 
-    let store = load_accounts().map_err(|e| e.to_string())?;
+    let store = load_accounts_with_current_active().map_err(|e| e.to_string())?;
     let active_id = store.active_account_id.as_deref();
 
     Ok(AccountInfo::from_stored(&stored, active_id))
@@ -112,7 +113,7 @@ pub async fn add_account_from_auth_json_text(
     let account = import_from_auth_json_contents(&contents, name).map_err(|e| e.to_string())?;
     let stored = add_account(account).map_err(|e| e.to_string())?;
 
-    let store = load_accounts().map_err(|e| e.to_string())?;
+    let store = load_accounts_with_current_active().map_err(|e| e.to_string())?;
     let active_id = store.active_account_id.as_deref();
 
     Ok(AccountInfo::from_stored(&stored, active_id))

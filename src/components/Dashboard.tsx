@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { useAccounts, useSettings, useSwitchLog } from "../hooks/useAccounts";
 import { AccountCard, AddAccountModal, Settings, SwitchLog } from "./";
 
@@ -53,6 +54,18 @@ export function Dashboard() {
       }
     });
   }, [loadMaskedAccountIds]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("open-settings", () => {
+      setIsSettingsOpen(true);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   const toggleMask = (accountId: string) => {
     setMaskedAccounts((prev) => {
