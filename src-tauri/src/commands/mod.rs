@@ -2,8 +2,8 @@
 
 pub mod account;
 pub mod manual_switch;
-pub mod popup;
 pub mod oauth;
+pub mod popup;
 pub mod process;
 pub mod session;
 pub mod settings;
@@ -12,8 +12,8 @@ pub mod usage;
 
 pub use account::*;
 pub use manual_switch::*;
-pub use popup::*;
 pub use oauth::*;
+pub use popup::*;
 pub use process::*;
 pub use session::*;
 pub use settings::*;

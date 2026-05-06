@@ -85,7 +85,14 @@ function App() {
 
   if (windowLabel === "tray-popup") {
     return (
-      <div style={{ padding: 8 }}>
+      <div
+        style={{
+          width: "100vw",
+          height: "100vh",
+          overflow: "hidden",
+          background: "transparent",
+        }}
+      >
         <TrayPopup />
       </div>
     );

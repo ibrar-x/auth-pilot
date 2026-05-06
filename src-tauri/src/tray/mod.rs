@@ -1,6 +1,6 @@
-//! Tray manager - system tray icon and popup window
-
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
 use tauri::{
@@ -8,10 +8,12 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Manager, Wry,
 };
-use tauri_plugin_notification::NotificationExt;
 
-use crate::switch_executor;
-use crate::types::{MonitorState, SwitchReason, UsageInfo};
+use crate::types::{MonitorState, UsageInfo};
+
+const POPUP_BLUR_GRACE_MS: i64 = 400;
+const POPUP_WIDTH: f64 = 340.0;
+const POPUP_HEIGHT: f64 = 420.0;
 
 pub fn setup_tray(
     app: &AppHandle,
@@ -20,6 +22,9 @@ pub fn setup_tray(
     let menu = build_fallback_menu(app)?;
 
     let tray_state = state.clone();
+    let popup_interaction_at = Arc::new(AtomicI64::new(0));
+    let popup_interaction_state = popup_interaction_at.clone();
+
     let tray_icon_bytes = include_bytes!("../../icons/tray-icon-white.png");
     let tray_icon = tauri::image::Image::from_bytes(tray_icon_bytes)
         .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
@@ -38,14 +43,21 @@ pub fn setup_tray(
             }
         })
         .on_tray_icon_event(move |tray, event| {
-            if let tauri::tray::TrayIconEvent::Click { button, .. } = event {
-                match button {
-                    tauri::tray::MouseButton::Left => {
-                        let app = tray.app_handle();
-                        toggle_tray_popup(app, &tray_state);
+            if let tauri::tray::TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
+                if button_state == tauri::tray::MouseButtonState::Down {
+                    match button {
+                        tauri::tray::MouseButton::Left => {
+                            let app = tray.app_handle();
+                            toggle_tray_popup(app, &tray_state, &popup_interaction_at);
+                        }
+                        tauri::tray::MouseButton::Right => {}
+                        _ => {}
                     }
-                    tauri::tray::MouseButton::Right => {}
-                    _ => {}
                 }
             }
         })
@@ -61,16 +73,38 @@ pub fn setup_tray(
         }
     });
 
+    app.manage(PopupInteractionState(popup_interaction_state.clone()));
+
+    if let Some(popup) = app.get_webview_window("tray-popup") {
+        attach_popup_auto_hide(&popup, popup_interaction_state);
+    }
+
     Ok(())
 }
 
-fn toggle_tray_popup(app: &AppHandle, _state: &Arc<RwLock<MonitorState>>) {
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn touch_popup_interaction(popup_interaction_at: &Arc<AtomicI64>) {
+    popup_interaction_at.store(now_millis(), Ordering::SeqCst);
+}
+
+fn toggle_tray_popup(
+    app: &AppHandle,
+    _state: &Arc<RwLock<MonitorState>>,
+    popup_interaction_at: &Arc<AtomicI64>,
+) {
     if let Some(popup) = app.get_webview_window("tray-popup") {
         let is_visible = popup.is_visible().unwrap_or(false);
         if is_visible {
             let _ = popup.hide();
         } else {
             position_popup_near_tray(app, &popup);
+            touch_popup_interaction(popup_interaction_at);
             let _ = popup.show();
             let _ = popup.set_focus();
         }
@@ -83,7 +117,7 @@ fn toggle_tray_popup(app: &AppHandle, _state: &Arc<RwLock<MonitorState>>) {
         tauri::WebviewUrl::App("index.html".into()),
     )
     .title("AuthPilot")
-    .inner_size(272.0, 420.0)
+    .inner_size(POPUP_WIDTH, POPUP_HEIGHT)
     .decorations(false)
     .always_on_top(true)
     .skip_taskbar(true)
@@ -93,16 +127,9 @@ fn toggle_tray_popup(app: &AppHandle, _state: &Arc<RwLock<MonitorState>>) {
 
     match popup_result {
         Ok(popup) => {
-            let popup_clone = popup.clone();
-            popup.on_window_event(move |event| {
-                if let tauri::WindowEvent::Focused(is_focused) = event {
-                    if !is_focused {
-                        let _ = popup_clone.hide();
-                    }
-                }
-            });
-
+            attach_popup_auto_hide(&popup, popup_interaction_at.clone());
             position_popup_near_tray(app, &popup);
+            touch_popup_interaction(popup_interaction_at);
             let _ = popup.show();
             let _ = popup.set_focus();
         }
@@ -112,10 +139,38 @@ fn toggle_tray_popup(app: &AppHandle, _state: &Arc<RwLock<MonitorState>>) {
     }
 }
 
+fn attach_popup_auto_hide(popup: &tauri::WebviewWindow, popup_interaction_at: Arc<AtomicI64>) {
+    let popup_clone = popup.clone();
+    popup.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(false) = event {
+            let focus_lost_at = now_millis();
+            let popup_for_hide = popup_clone.clone();
+            let interaction_for_hide = popup_interaction_at.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+                let last_interaction_at = interaction_for_hide.load(Ordering::SeqCst);
+                if last_interaction_at >= focus_lost_at {
+                    return;
+                }
+                if now_millis() - last_interaction_at < POPUP_BLUR_GRACE_MS {
+                    return;
+                }
+                let _ = popup_for_hide.hide();
+            });
+        }
+    });
+}
+
+pub struct PopupInteractionState(Arc<AtomicI64>);
+
+impl PopupInteractionState {
+    pub fn touch(&self) {
+        touch_popup_interaction(&self.0);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn position_popup_near_tray(app: &AppHandle, popup: &tauri::WebviewWindow) {
-    use tauri::Monitor;
-
     if let Some(tray) = app.tray_by_id("main") {
         if let Ok(Some(rect)) = tray.rect() {
             let (tray_x, tray_y) = match rect.position {
@@ -127,8 +182,8 @@ fn position_popup_near_tray(app: &AppHandle, popup: &tauri::WebviewWindow) {
                 tauri::Size::Logical(s) => (s.width, s.height),
             };
 
-            let popup_w = 272.0;
-            let popup_h = 420.0;
+            let popup_w = POPUP_WIDTH;
+            let popup_h = POPUP_HEIGHT;
 
             let mut x = tray_x + (tray_w / 2.0) - (popup_w / 2.0);
             let mut y = tray_y + tray_h + 4.0;
@@ -167,7 +222,13 @@ fn position_popup_near_tray(_app: &AppHandle, popup: &tauri::WebviewWindow) {
 
 fn build_fallback_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
-    let dashboard = MenuItem::with_id(app, "show_dashboard", "Open Dashboard...", true, None::<&str>)?;
+    let dashboard = MenuItem::with_id(
+        app,
+        "show_dashboard",
+        "Open Dashboard...",
+        true,
+        None::<&str>,
+    )?;
     menu.append(&dashboard)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     let quit = MenuItem::with_id(app, "quit", "Quit AuthPilot", true, None::<&str>)?;
@@ -182,8 +243,16 @@ fn build_tray_menu(
 ) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
     let active_label = if let Some(store) = store {
-        store.active_account_id.as_ref()
-            .and_then(|id| store.accounts.iter().find(|a| a.id == *id).map(|a| format!("Active: {}", a.name)))
+        store
+            .active_account_id
+            .as_ref()
+            .and_then(|id| {
+                store
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == *id)
+                    .map(|a| format!("Active: {}", a.name))
+            })
             .unwrap_or_else(|| "AuthPilot".to_string())
     } else {
         "AuthPilot".to_string()
@@ -199,19 +268,40 @@ fn build_tray_menu(
             }
             let usage = usages.iter().find(|u| u.account_id == account.id);
             let label = if let Some(u) = usage {
-                let primary = u.primary_used_percent.map(|p| format!("{:.0}%", p)).unwrap_or_else(|| "?".to_string());
-                let secondary = u.secondary_used_percent.map(|p| format!("{:.0}%", p)).unwrap_or_else(|| "?".to_string());
-                format!("{} — 5h window: {} | 7-day: {}", account.name, primary, secondary)
+                let primary = u
+                    .primary_used_percent
+                    .map(|p| format!("{:.0}%", p))
+                    .unwrap_or_else(|| "?".to_string());
+                let secondary = u
+                    .secondary_used_percent
+                    .map(|p| format!("{:.0}%", p))
+                    .unwrap_or_else(|| "?".to_string());
+                format!(
+                    "{} — 5h window: {} | 7-day: {}",
+                    account.name, primary, secondary
+                )
             } else {
                 format!("{} — loading...", account.name)
             };
-            let item = MenuItem::with_id(app, format!("switch_{}", account.id), label, true, None::<&str>)?;
+            let item = MenuItem::with_id(
+                app,
+                format!("switch_{}", account.id),
+                label,
+                true,
+                None::<&str>,
+            )?;
             menu.append(&item)?;
         }
     }
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    let settings = MenuItem::with_id(app, "show_settings", "Open Dashboard...", true, None::<&str>)?;
+    let settings = MenuItem::with_id(
+        app,
+        "show_settings",
+        "Open Dashboard...",
+        true,
+        None::<&str>,
+    )?;
     menu.append(&settings)?;
     let quit = MenuItem::with_id(app, "quit", "Quit AuthPilot", true, None::<&str>)?;
     menu.append(&quit)?;
@@ -224,7 +314,10 @@ async fn update_tray_menu(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (usages, cached_accounts) = {
         let state_guard = state.read().await;
-        (state_guard.latest_usages.clone(), state_guard.cached_accounts.clone())
+        (
+            state_guard.latest_usages.clone(),
+            state_guard.cached_accounts.clone(),
+        )
     };
     if let Some(tray) = app.tray_by_id("main") {
         let menu = build_tray_menu(app, &usages, cached_accounts.as_ref())?;

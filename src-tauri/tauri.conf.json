@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "AuthPilot",
@@ -22,7 +23,7 @@
       {
         "label": "tray-popup",
         "title": "AuthPilot",
-        "width": 272,
+        "width": 340,
         "height": 420,
         "visible": false,
         "decorations": false,

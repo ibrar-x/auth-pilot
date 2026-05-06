@@ -2,10 +2,11 @@
 
 use crate::auth::storage::{get_active_account, load_accounts};
 use crate::switch_executor;
+use crate::tray::PopupInteractionState;
 use crate::types::{AccountInfo, SwitchReason, UsageInfo};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tauri::{AppHandle, Manager};
+use tokio::sync::RwLock;
 
 use crate::types::MonitorState;
 
@@ -64,7 +65,18 @@ pub async fn popup_switch_account(
 }
 
 #[tauri::command]
+pub fn tray_popup_interaction(
+    interaction: tauri::State<'_, PopupInteractionState>,
+) -> Result<(), String> {
+    interaction.touch();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn show_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(popup) = app.get_webview_window("tray-popup") {
+        let _ = popup.hide();
+    }
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
