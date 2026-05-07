@@ -436,6 +436,35 @@ export function useSettings() {
     loadSettings();
   }, [loadSettings]);
 
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<AppSettings>("settings-updated", (event) => {
+          setSettings(event.payload);
+        })
+      )
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to listen for settings updates:", err);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   return { settings, loading, saveSettings, loadSettings };
 }
 

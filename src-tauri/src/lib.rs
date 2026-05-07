@@ -38,10 +38,15 @@ pub fn run() {
     // Setup tracing
     setup_logging();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+
+    builder
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Prevent window from closing, hide it instead

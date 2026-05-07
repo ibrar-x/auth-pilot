@@ -15,6 +15,14 @@ use crate::switch_executor;
 use crate::switch_log;
 use crate::types::{AccountsStore, AppSettings, SwitchEvent, SwitchReason, UsageInfo};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriggerOutcome {
+    Switched,
+    Deferred,
+}
+
+const CRITICAL_REMAINING_PERCENT: f64 = 5.0;
+
 pub fn should_auto_switch(
     usage: &UsageInfo,
     settings: &AppSettings,
@@ -42,6 +50,16 @@ pub fn should_auto_switch(
         .map(|s| s.switch_threshold)
         .unwrap_or(95.0);
 
+    if !usage_windows_complete(usage) {
+        tracing::info!(
+            "Account {} missing 5h or weekly usage, skipping auto-switch decision: 5h={:?}, weekly={:?}",
+            usage.account_id,
+            usage.primary_used_percent,
+            usage.secondary_used_percent
+        );
+        return false;
+    }
+
     let over_threshold = usage_window_over_threshold(usage, threshold);
 
     if over_threshold {
@@ -57,11 +75,15 @@ pub fn should_auto_switch(
     over_threshold
 }
 
+pub fn usage_is_critical(usage: &UsageInfo) -> bool {
+    usage_window_remaining_at_or_below(usage, CRITICAL_REMAINING_PERCENT)
+}
+
 pub async fn trigger(
     active_account_id: String,
     app_handle: &AppHandle,
     state: &Arc<RwLock<crate::types::MonitorState>>,
-) -> Result<()> {
+) -> Result<TriggerOutcome> {
     tracing::info!("Auto-switch triggered for account {}", active_account_id);
 
     let store = load_accounts_with_current_active()?;
@@ -91,7 +113,7 @@ pub async fn trigger(
             active_account_id
         );
         let _ = app_handle.emit("auto-switch-deferred", &target);
-        return Ok(());
+        return Ok(TriggerOutcome::Deferred);
     }
 
     // Execute the switch
@@ -117,7 +139,7 @@ pub async fn trigger(
     let _ = app_handle.emit("auto-switch-triggered", &event);
     let _ = app_handle.emit("account-switched", &event);
 
-    Ok(())
+    Ok(TriggerOutcome::Switched)
 }
 
 fn select_target_account(
@@ -220,6 +242,20 @@ fn usage_window_over_threshold(usage: &UsageInfo, threshold: f64) -> bool {
         || usage
             .secondary_used_percent
             .is_some_and(|used| used >= threshold)
+}
+
+fn usage_windows_complete(usage: &UsageInfo) -> bool {
+    usage.primary_used_percent.is_some() && usage.secondary_used_percent.is_some()
+}
+
+fn usage_window_remaining_at_or_below(usage: &UsageInfo, remaining_threshold: f64) -> bool {
+    usage.primary_used_percent.is_some_and(|used| {
+        let remaining = (100.0 - used).clamp(0.0, 100.0);
+        remaining <= remaining_threshold
+    }) || usage.secondary_used_percent.is_some_and(|used| {
+        let remaining = (100.0 - used).clamp(0.0, 100.0);
+        remaining <= remaining_threshold
+    })
 }
 
 fn usage_has_capacity(usage: &UsageInfo, threshold: f64) -> bool {
@@ -392,6 +428,18 @@ mod tests {
         assert!(!should_auto_switch(
             &usage,
             &settings,
+            &store("active", &["active"])
+        ));
+    }
+
+    #[test]
+    fn should_not_auto_switch_when_active_weekly_usage_is_missing() {
+        let mut active_usage = usage("active", 100.0, 0.0);
+        active_usage.secondary_used_percent = None;
+
+        assert!(!should_auto_switch(
+            &active_usage,
+            &settings(),
             &store("active", &["active"])
         ));
     }

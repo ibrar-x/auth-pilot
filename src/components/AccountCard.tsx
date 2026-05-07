@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import type { AccountWithUsage, UsageDisplayMode } from "../types";
+import { getMaskedText, type PrivacyMaskOptions } from "../lib/privacy";
 import { UsageBar } from "./UsageBar";
 
 interface AccountCardProps {
@@ -13,6 +14,7 @@ interface AccountCardProps {
   masked?: boolean;
   onToggleMask?: () => void;
   usageDisplayMode?: UsageDisplayMode;
+  privacyMask?: PrivacyMaskOptions;
 }
 
 function formatLastRefresh(date: Date | null): string {
@@ -48,6 +50,7 @@ export function AccountCard({
   masked = false,
   onToggleMask,
   usageDisplayMode = "remaining",
+  privacyMask,
 }: AccountCardProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(
@@ -128,6 +131,13 @@ export function AccountCard({
 
   const planKey = account.plan_type?.toLowerCase() || "api_key";
   const planColorClass = planColors[planKey] || planColors.free;
+  const effectivePrivacyMask: PrivacyMaskOptions = privacyMask?.enabled
+    ? privacyMask
+    : { enabled: masked, style: "blur", replacementText: "Hidden" };
+  const displayedName = getMaskedText(account.name, effectivePrivacyMask);
+  const displayedEmail = account.email ? getMaskedText(account.email, effectivePrivacyMask) : null;
+  const detailsHidden = effectivePrivacyMask.enabled;
+  const globalPrivacyActive = privacyMask?.enabled ?? false;
 
   return (
     <div
@@ -160,19 +170,19 @@ export function AccountCard({
               <h3
                 className="font-medium text-[#141413] dark:text-[#f3f0ee] truncate cursor-pointer hover:text-[#696969] dark:hover:text-[#9a9a9a] transition-colors text-base"
                 onClick={() => {
-                  if (masked) return;
+                  if (detailsHidden) return;
                   setEditName(account.name);
                   setIsEditing(true);
                 }}
-                title={masked ? undefined : "Click to rename"}
+                title={detailsHidden ? undefined : "Click to rename"}
               >
-                <BlurredText blur={masked}>{account.name}</BlurredText>
+                <BlurredText blur={displayedName.blur}>{displayedName.text}</BlurredText>
               </h3>
             )}
           </div>
-          {account.email && (
+          {displayedEmail && (
             <p className="text-sm text-[#696969] dark:text-[#9a9a9a] truncate">
-              <BlurredText blur={masked}>{account.email}</BlurredText>
+              <BlurredText blur={displayedEmail.blur}>{displayedEmail.text}</BlurredText>
             </p>
           )}
         </div>
@@ -182,9 +192,9 @@ export function AccountCard({
             <button
               onClick={onToggleMask}
               className="p-2 text-[#696969] hover:text-[#141413] dark:hover:text-[#f3f0ee] transition-colors rounded-[4px] hover:bg-[#F3F0EE] dark:hover:bg-[#2a2a2a]"
-              title={masked ? "Show info" : "Hide info"}
+              title={globalPrivacyActive ? "Global privacy is active" : masked ? "Show info" : "Hide info"}
             >
-              {masked ? (
+              {detailsHidden ? (
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                 </svg>

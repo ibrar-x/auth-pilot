@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type KeyboardEvent, useState } from "react";
 import type { AppSettings, AccountWithUsage } from "../types";
 import { invokeBackend } from "../lib/platform";
 
@@ -44,11 +44,99 @@ const USAGE_DISPLAY_MODES = [
   },
 ] as const;
 
+const PRIVACY_MASK_STYLES = [
+  {
+    value: "blur",
+    label: "Blur",
+    description: "Keep layout intact and blur account details.",
+  },
+  {
+    value: "replace",
+    label: "Replace",
+    description: "Show one safe word instead of names and emails.",
+  },
+] as const;
+
+const DEFAULT_DASHBOARD_SHORTCUT = "CommandOrControl+Shift+A";
+
+function getDefaultSettings(): AppSettings {
+  return {
+    poll_interval_seconds: 60,
+    notifications_enabled: true,
+    auto_switch_enabled: true,
+    global_cooldown_seconds: 300,
+    last_auto_switch: null,
+    account_settings: {},
+    theme: "system",
+    usage_display_mode: "remaining",
+    start_at_login: false,
+    show_in_dock: false,
+    privacy_mode_enabled: false,
+    privacy_mask_style: "blur",
+    privacy_replacement_text: "Hidden",
+    dashboard_global_shortcut: DEFAULT_DASHBOARD_SHORTCUT,
+  };
+}
+
+function keyToShortcutPart(key: string): string | null {
+  if (key === " ") return "Space";
+  if (key.length === 1) return key.toUpperCase();
+
+  const normalizedKeys: Record<string, string> = {
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    ArrowUp: "Up",
+    Backspace: "Backspace",
+    Delete: "Delete",
+    End: "End",
+    Enter: "Enter",
+    Escape: "Esc",
+    Home: "Home",
+    Insert: "Insert",
+    PageDown: "PageDown",
+    PageUp: "PageUp",
+    Tab: "Tab",
+  };
+
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return key;
+  return normalizedKeys[key] ?? null;
+}
+
+function shortcutFromKeyboardEvent(event: KeyboardEvent<HTMLElement>): string | null {
+  const key = keyToShortcutPart(event.key);
+  if (!key) return null;
+
+  const modifiers: string[] = [];
+  if (event.metaKey || event.ctrlKey) modifiers.push("CommandOrControl");
+  if (event.altKey) modifiers.push("Alt");
+  if (event.shiftKey) modifiers.push("Shift");
+
+  if (modifiers.length === 0) return null;
+  return [...modifiers, key].join("+");
+}
+
+function formatShortcutLabel(shortcut: string | undefined): string {
+  if (!shortcut?.trim()) return "Disabled";
+
+  return shortcut
+    .trim()
+    .split("+")
+    .map((part) => {
+      if (part === "CommandOrControl") return "Cmd/Ctrl";
+      if (part === "Alt") return "Option";
+      if (part === "Shift") return "Shift";
+      return part;
+    })
+    .join(" + ");
+}
+
 export function Settings({ settings, onSave, onClose, accounts }: SettingsProps) {
   const [formSettings, setFormSettings] = useState<AppSettings>({ ...settings });
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const [isRecordingShortcut, setIsRecordingShortcut] = useState(false);
 
   const handleSave = async () => {
     try {
@@ -73,6 +161,41 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
     } catch (err) {
       console.error("Failed to export settings:", err);
     }
+  };
+
+  const handleResetToDefaults = () => {
+    const defaults = getDefaultSettings();
+    setFormSettings(defaults);
+    applyTheme(defaults.theme);
+    setIsRecordingShortcut(false);
+  };
+
+  const handleShortcutKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      setIsRecordingShortcut(false);
+      return;
+    }
+
+    if (event.key === "Backspace" || event.key === "Delete") {
+      setFormSettings((prev) => ({
+        ...prev,
+        dashboard_global_shortcut: "",
+      }));
+      setIsRecordingShortcut(false);
+      return;
+    }
+
+    const shortcut = shortcutFromKeyboardEvent(event);
+    if (!shortcut) return;
+
+    setFormSettings((prev) => ({
+      ...prev,
+      dashboard_global_shortcut: shortcut,
+    }));
+    setIsRecordingShortcut(false);
   };
 
   const updateAccountThreshold = (accountId: string, threshold: number) => {
@@ -303,6 +426,122 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
               </div>
             </div>
 
+            <div className="space-y-3 rounded-[4px] border border-[#D1CDC7] dark:border-[#3a3a3a] p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <label className="text-sm font-medium text-[#141413] dark:text-[#f3f0ee]">
+                    Privacy mode
+                  </label>
+                  <p className="text-xs text-[#696969] dark:text-[#9a9a9a] mt-1">
+                    Hide account names and emails in the dashboard and tray.
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    setFormSettings((prev) => ({
+                      ...prev,
+                      privacy_mode_enabled: !(prev.privacy_mode_enabled ?? false),
+                    }))
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-[4px] transition-colors ${
+                    formSettings.privacy_mode_enabled
+                      ? "bg-[#141413] dark:bg-[#f3f0ee]"
+                      : "bg-[#D1CDC7] dark:bg-[#3a3a3a]"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-[4px] bg-white transition-transform ${
+                      formSettings.privacy_mode_enabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#141413] dark:text-[#f3f0ee] mb-2">
+                  Privacy style
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {PRIVACY_MASK_STYLES.map((style) => {
+                    const isActive = (formSettings.privacy_mask_style ?? "blur") === style.value;
+                    return (
+                      <button
+                        key={style.value}
+                        onClick={() =>
+                          setFormSettings((prev) => ({
+                            ...prev,
+                            privacy_mask_style: style.value,
+                          }))
+                        }
+                        className={`text-left px-3 py-2.5 rounded-[4px] border transition-all ${
+                          isActive
+                            ? "bg-[#141413] dark:bg-[#f3f0ee] text-[#F3F0EE] dark:text-[#141413] border-[#141413] dark:border-[#f3f0ee]"
+                            : "bg-transparent text-[#141413] dark:text-[#f3f0ee] border-[#D1CDC7] dark:border-[#3a3a3a] hover:border-[#141413] dark:hover:border-[#f3f0ee]"
+                        }`}
+                      >
+                        <div className="text-sm font-medium">{style.label}</div>
+                        <div className={`text-[11px] mt-1 ${isActive ? "opacity-70" : "text-[#696969] dark:text-[#9a9a9a]"}`}>
+                          {style.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#141413] dark:text-[#f3f0ee] mb-2">
+                  Replacement word
+                </label>
+                <input
+                  type="text"
+                  value={formSettings.privacy_replacement_text ?? "Hidden"}
+                  onChange={(e) =>
+                    setFormSettings((prev) => ({
+                      ...prev,
+                      privacy_replacement_text: e.target.value,
+                    }))
+                  }
+                  placeholder="Hidden"
+                  className="w-full px-4 py-2.5 border border-[#141413]/20 dark:border-[#f3f0ee]/20 rounded-[4px] text-sm focus:outline-none focus:border-[#141413] dark:focus:border-[#f3f0ee] bg-[#F3F0EE] dark:bg-[#2a2a2a] text-[#141413] dark:text-[#f3f0ee]"
+                />
+                <p className="text-xs text-[#696969] dark:text-[#9a9a9a] mt-1">
+                  Used when privacy style is set to Replace.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[#141413] dark:text-[#f3f0ee] mb-2">
+                Dashboard Shortcut
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsRecordingShortcut(true)}
+                onBlur={() => setIsRecordingShortcut(false)}
+                onKeyDown={handleShortcutKeyDown}
+                className={`w-full px-4 py-3 border rounded-[4px] text-left focus:outline-none focus:border-[#141413] dark:focus:border-[#f3f0ee] transition-colors ${
+                  isRecordingShortcut
+                    ? "border-[#141413] dark:border-[#f3f0ee] bg-white dark:bg-[#262627]"
+                    : "border-[#141413]/20 dark:border-[#f3f0ee]/20 bg-[#F3F0EE] dark:bg-[#2a2a2a]"
+                }`}
+              >
+                <span className="block text-xs text-[#696969] dark:text-[#9a9a9a] mb-1">
+                  {isRecordingShortcut ? "Press a shortcut" : "Current shortcut"}
+                </span>
+                <span className="font-mono text-sm text-[#141413] dark:text-[#f3f0ee]">
+                  {isRecordingShortcut
+                    ? "Waiting for keys..."
+                    : formatShortcutLabel(
+                        formSettings.dashboard_global_shortcut ?? DEFAULT_DASHBOARD_SHORTCUT
+                      )}
+                </span>
+              </button>
+              <p className="text-xs text-[#696969] dark:text-[#9a9a9a] mt-1">
+                Click, then press a key combination. Backspace disables it; Escape cancels recording.
+              </p>
+            </div>
+
             {/* Cooldown */}
             <div>
               <label className="block text-sm font-medium text-[#141413] dark:text-[#f3f0ee] mb-2">
@@ -361,6 +600,13 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
 
         {/* Footer Buttons */}
         <div className="flex gap-3 p-6 pt-4 shrink-0 border-t border-[#F3F0EE] dark:border-[#2a2a2a]">
+          <button
+            onClick={handleResetToDefaults}
+            disabled={saving}
+            className="px-4 py-2.5 text-sm font-medium rounded-[4px] bg-transparent border border-[#D1CDC7] dark:border-[#3a3a3a] hover:border-[#141413] dark:hover:border-[#f3f0ee] text-[#141413] dark:text-[#f3f0ee] transition-colors disabled:opacity-50"
+          >
+            Reset
+          </button>
           <button
             onClick={onClose}
             className="flex-1 px-5 py-2.5 text-sm font-medium rounded-[4px] bg-[#F3F0EE] hover:bg-[#D1CDC7] dark:bg-[#2a2a2a] dark:hover:bg-[#3a3a3a] text-[#141413] dark:text-[#f3f0ee] transition-colors"

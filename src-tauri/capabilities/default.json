@@ -6,6 +6,8 @@
   "permissions": [
     "core:default",
     "dialog:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister-all",
     "notification:default",
     "opener:default"
   ]

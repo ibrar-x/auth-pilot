@@ -1,16 +1,27 @@
 //! ChatGPT OAuth token refresh helpers
 
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
 use anyhow::{Context, Result};
 use base64::Engine;
 use chrono::Utc;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
-use super::{load_accounts_with_current_active, switch_to_account, update_account_chatgpt_tokens};
+use super::{
+    get_account, load_accounts_with_current_active, switch_to_account,
+    update_account_chatgpt_tokens,
+};
 use crate::types::{parse_chatgpt_id_token_claims, AuthData, StoredAccount};
 
 const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const EXPIRY_SKEW_SECONDS: i64 = 60;
+const REFRESH_TOKEN_REUSED_CODE: &str = "refresh_token_reused";
+
+static TOKEN_REFRESH_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+    OnceLock::new();
 
 #[derive(Debug, serde::Deserialize)]
 struct RefreshTokenResponse {
@@ -39,6 +50,12 @@ pub async fn ensure_chatgpt_tokens_fresh(account: &StoredAccount) -> Result<Stor
 }
 
 pub async fn refresh_chatgpt_tokens(account: &StoredAccount) -> Result<StoredAccount> {
+    let account_lock = token_refresh_lock_for_account(&account.id)?;
+    let _guard = account_lock.lock().await;
+
+    let account = get_account(&account.id)?
+        .with_context(|| format!("Account not found while refreshing tokens: {}", account.id))?;
+
     let (current_id_token, current_refresh_token, current_account_id) = match &account.auth_data {
         AuthData::ApiKey { .. } => return Ok(account.clone()),
         AuthData::ChatGPT {
@@ -53,7 +70,24 @@ pub async fn refresh_chatgpt_tokens(account: &StoredAccount) -> Result<StoredAcc
         anyhow::bail!("Missing refresh token for account {}", account.name);
     }
 
-    let refreshed = refresh_tokens_with_refresh_token(&current_refresh_token).await?;
+    if let Some(latest) = latest_usable_account_after_external_refresh(&account)? {
+        return Ok(latest);
+    }
+
+    let refreshed = match refresh_tokens_with_refresh_token(&current_refresh_token).await {
+        Ok(refreshed) => refreshed,
+        Err(err) if is_refresh_token_reused_error(&err) => {
+            if let Some(latest) = latest_usable_account_after_external_refresh(&account)? {
+                tracing::warn!(
+                    "Refresh token was already rotated for account {}; using persisted fresh tokens",
+                    account.name
+                );
+                return Ok(latest);
+            }
+            return Err(err);
+        }
+        Err(err) => return Err(err),
+    };
     let next_id_token = refreshed.id_token.unwrap_or(current_id_token);
     let next_refresh_token = refreshed
         .refresh_token
@@ -78,6 +112,13 @@ pub async fn refresh_chatgpt_tokens(account: &StoredAccount) -> Result<StoredAcc
         claims.subscription_expires_at,
     )?;
 
+    if let Err(err) = crate::session::snapshot_account_from_data(&updated) {
+        tracing::warn!(
+            "Failed to update auth snapshot after token refresh for account {}: {err}",
+            updated.id
+        );
+    }
+
     if is_active {
         if let Err(err) = switch_to_account(&updated) {
             tracing::warn!("Failed to sync active auth.json after token refresh: {err}");
@@ -85,6 +126,49 @@ pub async fn refresh_chatgpt_tokens(account: &StoredAccount) -> Result<StoredAcc
     }
 
     Ok(updated)
+}
+
+fn token_refresh_lock_for_account(account_id: &str) -> Result<Arc<Mutex<()>>> {
+    let locks = TOKEN_REFRESH_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = locks
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Token refresh lock poisoned"))?;
+
+    Ok(guard
+        .entry(account_id.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone())
+}
+
+fn latest_usable_account_after_external_refresh(
+    account: &StoredAccount,
+) -> Result<Option<StoredAccount>> {
+    let Some(latest) = get_account(&account.id)? else {
+        return Ok(None);
+    };
+
+    match (&account.auth_data, &latest.auth_data) {
+        (
+            AuthData::ChatGPT {
+                refresh_token: original_refresh_token,
+                ..
+            },
+            AuthData::ChatGPT {
+                access_token: latest_access_token,
+                refresh_token: latest_refresh_token,
+                ..
+            },
+        ) if latest_refresh_token != original_refresh_token
+            && !token_expired_or_near_expiry(latest_access_token) =>
+        {
+            Ok(Some(latest))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn is_refresh_token_reused_error(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains(REFRESH_TOKEN_REUSED_CODE)
 }
 
 pub async fn create_chatgpt_account_from_refresh_token(

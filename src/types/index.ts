@@ -50,9 +50,14 @@ export interface AppSettings {
   usage_display_mode?: UsageDisplayMode;
   start_at_login?: boolean;
   show_in_dock?: boolean;
+  privacy_mode_enabled?: boolean;
+  privacy_mask_style?: PrivacyMaskStyle;
+  privacy_replacement_text?: string;
+  dashboard_global_shortcut?: string;
 }
 
 export type UsageDisplayMode = "remaining" | "used";
+export type PrivacyMaskStyle = "blur" | "replace";
 
 export interface AccountSettings {
   switch_threshold: number;

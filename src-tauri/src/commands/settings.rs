@@ -24,9 +24,6 @@ pub async fn save_settings(new_settings: AppSettings, app: AppHandle) -> Result<
 
     let _ = crate::tray::refresh_accounts_and_tray_menu(&app).await;
     let _ = app.emit("settings-updated", &new_settings);
-    if let Err(err) = crate::app_behavior::show_main_window(&app) {
-        tracing::warn!("Failed to keep main window visible after settings save: {err}");
-    }
 
     Ok(())
 }

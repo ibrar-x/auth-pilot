@@ -301,6 +301,10 @@ pub struct AppSettings {
     pub usage_display_mode: UsageDisplayMode,
     pub start_at_login: bool,
     pub show_in_dock: bool,
+    pub privacy_mode_enabled: bool,
+    pub privacy_mask_style: PrivacyMaskStyle,
+    pub privacy_replacement_text: String,
+    pub dashboard_global_shortcut: String,
 }
 
 impl Default for AppSettings {
@@ -316,6 +320,10 @@ impl Default for AppSettings {
             usage_display_mode: UsageDisplayMode::Remaining,
             start_at_login: false,
             show_in_dock: false,
+            privacy_mode_enabled: false,
+            privacy_mask_style: PrivacyMaskStyle::Blur,
+            privacy_replacement_text: String::from("Hidden"),
+            dashboard_global_shortcut: String::from("CommandOrControl+Shift+A"),
         }
     }
 }
@@ -325,6 +333,13 @@ impl Default for AppSettings {
 pub enum UsageDisplayMode {
     Remaining,
     Used,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivacyMaskStyle {
+    Blur,
+    Replace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -386,7 +401,7 @@ pub struct MonitorState {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_chatgpt_id_token_claims;
+    use super::{parse_chatgpt_id_token_claims, AppSettings};
     use base64::Engine;
 
     #[test]
@@ -403,6 +418,31 @@ mod tests {
         assert_eq!(
             claims.subscription_expires_at.map(|v| v.to_rfc3339()),
             Some("2026-04-23T05:03:38+00:00".to_string())
+        );
+    }
+
+    #[test]
+    fn settings_default_privacy_fields_when_missing() {
+        let settings: AppSettings = serde_json::from_str(
+            r#"{
+                "poll_interval_seconds": 60,
+                "notifications_enabled": true,
+                "auto_switch_enabled": true,
+                "global_cooldown_seconds": 300,
+                "last_auto_switch": null,
+                "account_settings": {},
+                "theme": "system",
+                "usage_display_mode": "remaining"
+            }"#,
+        )
+        .expect("settings should deserialize with missing privacy fields");
+
+        assert!(!settings.privacy_mode_enabled);
+        assert_eq!(settings.privacy_mask_style, super::PrivacyMaskStyle::Blur);
+        assert_eq!(settings.privacy_replacement_text, "Hidden");
+        assert_eq!(
+            settings.dashboard_global_shortcut,
+            "CommandOrControl+Shift+A"
         );
     }
 }

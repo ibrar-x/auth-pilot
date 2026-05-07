@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Dashboard, TrayPopup } from "./components";
 import { invokeBackend, isTauriRuntime } from "./lib/platform";
+import { getDashboardShortcut, registerDashboardShortcut } from "./lib/dashboardShortcut";
 import type { AppSettings } from "./types";
 import "./App.css";
 
@@ -23,7 +24,7 @@ function applyTheme(theme: string) {
 function App() {
   const [firstRunRequired, setFirstRunRequired] = useState(false);
   const [consentGiven, setConsentGiven] = useState(false);
-  const [windowLabel, setWindowLabel] = useState<string>("main");
+  const [windowLabel, setWindowLabel] = useState<string | null>(null);
 
   useEffect(() => {
     if (isTauriRuntime()) {
@@ -32,8 +33,54 @@ function App() {
           setWindowLabel(getCurrentWindow().label);
         })
         .catch(() => setWindowLabel("main"));
+    } else {
+      setWindowLabel("main");
     }
   }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || windowLabel !== "main") return;
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    const applyShortcut = (settings: AppSettings | null) => {
+      const shortcut = getDashboardShortcut(settings);
+      registerDashboardShortcut(shortcut).catch((err) => {
+        console.warn(`Failed to register dashboard shortcut "${shortcut}":`, err);
+      });
+    };
+
+    invokeBackend<AppSettings>("get_settings")
+      .then((settings) => {
+        if (!disposed) applyShortcut(settings);
+      })
+      .catch(() => {
+        if (!disposed) applyShortcut(null);
+      });
+
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<AppSettings>("settings-updated", (event) => {
+          applyShortcut(event.payload);
+        })
+      )
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to listen for shortcut setting updates:", err);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [windowLabel]);
 
   useEffect(() => {
     if (isTauriRuntime()) {
@@ -82,6 +129,10 @@ function App() {
       console.error("Failed to enable file auth mode:", err);
     }
   };
+
+  if (windowLabel === null) {
+    return null;
+  }
 
   if (windowLabel === "tray-popup") {
     return (

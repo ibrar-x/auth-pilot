@@ -9,7 +9,7 @@ use tauri::{
     AppHandle, Manager, Wry,
 };
 
-use crate::types::{MonitorState, UsageDisplayMode, UsageInfo};
+use crate::types::{AppSettings, MonitorState, PrivacyMaskStyle, UsageDisplayMode, UsageInfo};
 
 const POPUP_BLUR_GRACE_MS: i64 = 400;
 const POPUP_WIDTH: f64 = 340.0;
@@ -240,25 +240,27 @@ fn build_tray_menu(
     app: &AppHandle,
     usages: &[UsageInfo],
     store: Option<&crate::types::AccountsStore>,
-    usage_display_mode: UsageDisplayMode,
+    settings: &AppSettings,
 ) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
+    let usage_display_mode = settings.usage_display_mode;
     let active_label = if let Some(store) = store {
         store
             .active_account_id
             .as_ref()
             .and_then(|id| {
                 store.accounts.iter().find(|a| a.id == *id).map(|a| {
+                    let account_name = private_account_name(&a.name, settings);
                     let usage = usages.iter().find(|u| u.account_id == a.id);
                     if let Some(usage) = usage {
                         format!(
                             "Active: {} — 5h: {} | 7-day: {}",
-                            a.name,
+                            account_name,
                             format_window_percent(usage.primary_used_percent, usage_display_mode),
                             format_window_percent(usage.secondary_used_percent, usage_display_mode)
                         )
                     } else {
-                        format!("Active: {}", a.name)
+                        format!("Active: {account_name}")
                     }
                 })
             })
@@ -276,14 +278,15 @@ fn build_tray_menu(
                 continue;
             }
             let usage = usages.iter().find(|u| u.account_id == account.id);
+            let account_name = private_account_name(&account.name, settings);
             let label = if let Some(u) = usage {
                 format!(
                     "{} — 5h: {}",
-                    account.name,
+                    account_name,
                     format_window_percent(u.primary_used_percent, usage_display_mode)
                 )
             } else {
-                format!("{} — loading...", account.name)
+                format!("{account_name} — loading...")
             };
             let item = MenuItem::with_id(
                 app,
@@ -308,6 +311,24 @@ fn build_tray_menu(
     let quit = MenuItem::with_id(app, "quit", "Quit AuthPilot", true, None::<&str>)?;
     menu.append(&quit)?;
     Ok(menu)
+}
+
+fn private_account_name(name: &str, settings: &AppSettings) -> String {
+    if !settings.privacy_mode_enabled {
+        return name.to_string();
+    }
+
+    match settings.privacy_mask_style {
+        PrivacyMaskStyle::Replace => {
+            let replacement = settings.privacy_replacement_text.trim();
+            if replacement.is_empty() {
+                "Hidden".to_string()
+            } else {
+                replacement.to_string()
+            }
+        }
+        PrivacyMaskStyle::Blur => "••••••".to_string(),
+    }
 }
 
 fn format_window_percent(
@@ -346,16 +367,16 @@ async fn update_tray_menu(
     app: &AppHandle,
     state: &Arc<RwLock<MonitorState>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (usages, cached_accounts, usage_display_mode) = {
+    let (usages, cached_accounts, settings) = {
         let state_guard = state.read().await;
         (
             state_guard.latest_usages.clone(),
             state_guard.cached_accounts.clone(),
-            state_guard.settings.usage_display_mode,
+            state_guard.settings.clone(),
         )
     };
     if let Some(tray) = app.tray_by_id("main") {
-        let menu = build_tray_menu(app, &usages, cached_accounts.as_ref(), usage_display_mode)?;
+        let menu = build_tray_menu(app, &usages, cached_accounts.as_ref(), &settings)?;
         tray.set_menu(Some(menu))?;
     }
     Ok(())

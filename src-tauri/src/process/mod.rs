@@ -1,14 +1,19 @@
 //! Process management for Codex Desktop App
 
+use std::fs;
+use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use tokio::time::sleep;
 
 const CODEX_RECENT_ACTIVITY_SECONDS: i64 = 120;
+const CODEX_SESSION_ACTIVITY_SECONDS: i64 = 300;
 const CODEX_TIMESTAMP_MARKER: &str = "event.timestamp=";
+const MAX_SESSION_SCAN_DEPTH: usize = 6;
+const MAX_SESSION_FILES_SCANNED: usize = 5000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProcessInfo {
@@ -34,10 +39,6 @@ pub fn is_codex_desktop_running() -> Result<bool> {
 /// is still running. This is intentionally conservative: if a non-background
 /// process is descended from the Codex app process tree, the caller should defer.
 pub fn is_codex_desktop_busy() -> Result<bool> {
-    if !is_codex_desktop_running()? {
-        return Ok(false);
-    }
-
     let output = Command::new("ps")
         .args(["-axo", "pid=,ppid=,command="])
         .output()
@@ -50,6 +51,22 @@ pub fn is_codex_desktop_busy() -> Result<bool> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let processes = parse_process_snapshot(&stdout);
+
+    if has_active_codex_cli_process(&processes) {
+        return Ok(true);
+    }
+
+    if codex_session_files_have_recent_activity().or_else(|err| {
+        tracing::debug!("Unable to inspect Codex session files: {err}");
+        Ok::<bool, anyhow::Error>(false)
+    })? {
+        return Ok(true);
+    }
+
+    if !is_codex_desktop_running()? {
+        return Ok(false);
+    }
+
     if codex_has_active_descendant_processes(&processes) {
         return Ok(true);
     }
@@ -134,8 +151,20 @@ fn parse_process_snapshot(output: &str) -> Vec<ProcessInfo> {
 fn codex_has_active_descendant_processes(processes: &[ProcessInfo]) -> bool {
     processes
         .iter()
-        .filter(|process| !is_background_codex_process(&process.command))
+        .filter(|process| !is_ignored_codex_process(&process.command))
         .any(|process| has_codex_background_ancestor(process.ppid, processes))
+}
+
+fn has_active_codex_cli_process(processes: &[ProcessInfo]) -> bool {
+    processes
+        .iter()
+        .filter(|process| !is_ignored_codex_process(&process.command))
+        .any(|process| command_executable_basename(&process.command) == Some("codex"))
+}
+
+fn command_executable_basename(command: &str) -> Option<&str> {
+    let executable = command.split_whitespace().next()?;
+    executable.rsplit('/').next()
 }
 
 fn has_codex_background_ancestor(mut ppid: u32, processes: &[ProcessInfo]) -> bool {
@@ -163,6 +192,113 @@ fn is_background_codex_process(command: &str) -> bool {
         || command.contains("/Codex.app/Contents/Resources/codex app-server")
         || command.contains("/Codex.app/Contents/Resources/node_repl")
         || command.contains("Codex Helper")
+}
+
+fn is_ignored_codex_process(command: &str) -> bool {
+    is_background_codex_process(command) || is_codex_service_process(command)
+}
+
+fn is_codex_service_process(command: &str) -> bool {
+    command.contains("notify-mcp/notify-mcp.sh")
+        || command.contains("@playwright/mcp")
+        || command.contains("playwright-mcp")
+}
+
+fn codex_session_files_have_recent_activity() -> Result<bool> {
+    let Some(home_dir) = dirs::home_dir() else {
+        return Ok(false);
+    };
+
+    let sessions_dir = home_dir.join(".codex").join("sessions");
+    if !sessions_dir.is_dir() {
+        return Ok(false);
+    }
+
+    codex_session_files_have_recent_activity_in(
+        &sessions_dir,
+        SystemTime::now(),
+        Duration::from_secs(CODEX_SESSION_ACTIVITY_SECONDS as u64),
+    )
+}
+
+fn codex_session_files_have_recent_activity_in(
+    sessions_dir: &Path,
+    now: SystemTime,
+    recent_window: Duration,
+) -> Result<bool> {
+    let mut stack = vec![(sessions_dir.to_path_buf(), 0usize)];
+    let mut files_scanned = 0usize;
+
+    while let Some((path, depth)) = stack.pop() {
+        if depth > MAX_SESSION_SCAN_DEPTH {
+            continue;
+        }
+
+        let entries = match fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(err) => {
+                tracing::debug!(
+                    "Unable to read Codex session path {}: {err}",
+                    path.display()
+                );
+                continue;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+
+            if metadata.is_dir() {
+                stack.push((entry_path, depth + 1));
+                continue;
+            }
+
+            if !metadata.is_file() || !is_codex_session_activity_file(&entry_path) {
+                continue;
+            }
+
+            files_scanned += 1;
+            if files_scanned > MAX_SESSION_FILES_SCANNED {
+                tracing::debug!(
+                    "Stopped Codex session scan after {MAX_SESSION_FILES_SCANNED} files"
+                );
+                return Ok(false);
+            }
+
+            let Ok(modified_at) = metadata.modified() else {
+                continue;
+            };
+
+            if system_time_age_within(now, modified_at, recent_window) {
+                tracing::info!("Codex session file is active: {}", entry_path.display());
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+fn is_codex_session_activity_file(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    file_name == "log.jsonl"
+        || file_name.ends_with(".jsonl")
+        || file_name.ends_with(".lock")
+        || file_name.ends_with(".tmp")
+        || file_name.contains("lock")
+}
+
+fn system_time_age_within(now: SystemTime, timestamp: SystemTime, window: Duration) -> bool {
+    match now.duration_since(timestamp) {
+        Ok(age) => age <= window,
+        Err(_) => true,
+    }
 }
 
 fn codex_logs_have_recent_activity() -> Result<bool> {
@@ -247,6 +383,8 @@ fn extract_codex_event_timestamps(output: &str) -> Vec<DateTime<Utc>> {
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use std::fs;
+    use std::time::SystemTime;
 
     #[test]
     fn detects_active_shell_process_under_codex() {
@@ -274,6 +412,71 @@ mod tests {
         let processes = parse_process_snapshot(snapshot);
 
         assert!(!codex_has_active_descendant_processes(&processes));
+    }
+
+    #[test]
+    fn ignores_codex_mcp_service_processes() {
+        let snapshot = r#"
+          100     1 /Applications/Codex.app/Contents/MacOS/Codex
+          101   100 /Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled
+          102   101 /Applications/Codex.app/Contents/Resources/node_repl
+          103   101 bash /Users/example/notify-mcp/notify-mcp.sh
+          104   101 npm exec @playwright/mcp@latest
+          105   104 node /Users/example/.npm/_npx/123/node_modules/.bin/playwright-mcp
+        "#;
+
+        let processes = parse_process_snapshot(snapshot);
+
+        assert!(!codex_has_active_descendant_processes(&processes));
+    }
+
+    #[test]
+    fn detects_standalone_codex_cli_process() {
+        let snapshot = r#"
+          200     1 /bin/zsh
+          201   200 /opt/homebrew/bin/codex exec run tests
+        "#;
+
+        let processes = parse_process_snapshot(snapshot);
+
+        assert!(has_active_codex_cli_process(&processes));
+    }
+
+    #[test]
+    fn detects_recent_codex_session_transcript_activity() {
+        let sessions_dir =
+            std::env::temp_dir().join(format!("authpilot-session-test-{}", uuid::Uuid::new_v4()));
+        let day_dir = sessions_dir.join("2026").join("05").join("07");
+        fs::create_dir_all(&day_dir).unwrap();
+        fs::write(day_dir.join("rollout-2026-05-07T10-00-00.jsonl"), "{}\n").unwrap();
+
+        let active = codex_session_files_have_recent_activity_in(
+            &sessions_dir,
+            SystemTime::now(),
+            Duration::from_secs(300),
+        )
+        .unwrap();
+
+        let _ = fs::remove_dir_all(&sessions_dir);
+        assert!(active);
+    }
+
+    #[test]
+    fn ignores_non_session_activity_files() {
+        let sessions_dir =
+            std::env::temp_dir().join(format!("authpilot-session-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&sessions_dir).unwrap();
+        fs::write(sessions_dir.join("notes.txt"), "not a session").unwrap();
+
+        let active = codex_session_files_have_recent_activity_in(
+            &sessions_dir,
+            SystemTime::now(),
+            Duration::from_secs(300),
+        )
+        .unwrap();
+
+        let _ = fs::remove_dir_all(&sessions_dir);
+        assert!(!active);
     }
 
     #[test]

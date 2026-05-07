@@ -2,9 +2,11 @@ import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { useAccounts, useSettings, useSwitchLog } from "../hooks/useAccounts";
+import { getPrivacyMaskOptions } from "../lib/privacy";
+import { isTauriRuntime } from "../lib/platform";
 import { AccountCard, AddAccountModal, Settings, SwitchLog } from "./";
 
-const appWindow = getCurrentWindow();
+const appWindow = isTauriRuntime() ? getCurrentWindow() : null;
 const isMacOs =
   typeof navigator !== "undefined" &&
   /(Mac|iPhone|iPod|iPad)/i.test(navigator.userAgent);
@@ -30,6 +32,7 @@ export function Dashboard() {
 
   const { settings, saveSettings } = useSettings();
   const usageDisplayMode = settings?.usage_display_mode ?? "remaining";
+  const privacyMask = getPrivacyMaskOptions(settings);
   const { events: switchEvents } = useSwitchLog();
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -57,6 +60,8 @@ export function Dashboard() {
   }, [loadMaskedAccountIds]);
 
   useEffect(() => {
+    if (!isTauriRuntime()) return;
+
     let unlisten: (() => void) | undefined;
     listen("open-settings", () => {
       setIsSettingsOpen(true);
@@ -119,6 +124,18 @@ export function Dashboard() {
     }
   };
 
+  const handleToggleGlobalPrivacy = async () => {
+    if (!settings) return;
+    try {
+      await saveSettings({
+        ...settings,
+        privacy_mode_enabled: !(settings.privacy_mode_enabled ?? false),
+      });
+    } catch (err) {
+      console.error("Failed to toggle privacy mode:", err);
+    }
+  };
+
   const handleImportSlimText = async () => {
     if (!configPayload.trim()) {
       setConfigModalError("Please paste the slim text string first.");
@@ -152,7 +169,7 @@ export function Dashboard() {
           {!isMacOs && (
             <div className="flex items-center gap-1">
               <button
-                onClick={() => void appWindow.minimize()}
+                onClick={() => void appWindow?.minimize()}
                 className="flex h-8 w-8 items-center justify-center rounded-md text-[#696969] hover:bg-[#F3F0EE] dark:hover:bg-[#2a2a2a]"
                 title="Minimize"
               >
@@ -161,7 +178,7 @@ export function Dashboard() {
                 </svg>
               </button>
               <button
-                onClick={() => void appWindow.close()}
+                onClick={() => void appWindow?.close()}
                 className="flex h-8 w-8 items-center justify-center rounded-md text-[#696969] hover:bg-[#CF4500] hover:text-white"
                 title="Close"
               >
@@ -191,6 +208,30 @@ export function Dashboard() {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                onClick={handleToggleGlobalPrivacy}
+                disabled={!settings}
+                className={`flex h-10 w-10 items-center justify-center rounded-[4px] transition-colors disabled:opacity-50 ${
+                  privacyMask.enabled
+                    ? "bg-[#141413] dark:bg-[#f3f0ee] text-[#F3F0EE] dark:text-[#141413]"
+                    : "bg-[#F3F0EE] dark:bg-[#2a2a2a] text-[#141413] dark:text-[#f3f0ee] hover:bg-[#D1CDC7] dark:hover:bg-[#3a3a3a]"
+                }`}
+                title={privacyMask.enabled ? "Show details" : "Hide all details"}
+              >
+                {privacyMask.enabled ? (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C7 20 2.73 16.89 1 12.5a11.7 11.7 0 0 1 3.07-4.56" />
+                    <path d="M9.9 4.24A10.64 10.64 0 0 1 12 4c5 0 9.27 3.11 11 7.5a11.7 11.7 0 0 1-2.11 3.19" />
+                    <path d="M14.12 14.12a3 3 0 0 1-4.24-4.24" />
+                    <path d="M3 3l18 18" />
+                  </svg>
+                ) : (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 12.5C3.73 8.11 8 5 12 5s8.27 3.11 10 7.5C20.27 16.89 16 20 12 20S3.73 16.89 2 12.5z" />
+                    <circle cx="12" cy="12.5" r="3" />
+                  </svg>
+                )}
+              </button>
               <button
                 onClick={handleRefresh}
                 disabled={isRefreshing}
@@ -293,6 +334,7 @@ export function Dashboard() {
                   masked={maskedAccounts.has(activeAccount.id)}
                   onToggleMask={() => toggleMask(activeAccount.id)}
                   usageDisplayMode={usageDisplayMode}
+                  privacyMask={privacyMask}
                 />
               </section>
             )}
@@ -316,6 +358,7 @@ export function Dashboard() {
                       masked={maskedAccounts.has(account.id)}
                       onToggleMask={() => toggleMask(account.id)}
                       usageDisplayMode={usageDisplayMode}
+                      privacyMask={privacyMask}
                     />
                   ))}
                 </div>
