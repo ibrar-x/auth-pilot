@@ -32,18 +32,6 @@ pub fn should_auto_switch(
         return false;
     }
 
-    // Check global cooldown
-    if let Some(last) = settings.last_auto_switch {
-        let elapsed = Utc::now().signed_duration_since(last).num_seconds();
-        if elapsed < settings.global_cooldown_seconds as i64 {
-            tracing::info!(
-                "Cooldown active: {}s remaining",
-                settings.global_cooldown_seconds as i64 - elapsed
-            );
-            return false;
-        }
-    }
-
     let threshold = settings
         .account_settings
         .get(&usage.account_id)
@@ -60,19 +48,36 @@ pub fn should_auto_switch(
         return false;
     }
 
+    let critical_usage = usage_is_critical(usage);
+    if !critical_usage {
+        // Check global cooldown for ordinary threshold crossings. Critical
+        // accounts keep retrying so Codex can be restarted as soon as it is idle.
+        if let Some(last) = settings.last_auto_switch {
+            let elapsed = Utc::now().signed_duration_since(last).num_seconds();
+            if elapsed < settings.global_cooldown_seconds as i64 {
+                tracing::info!(
+                    "Cooldown active: {}s remaining",
+                    settings.global_cooldown_seconds as i64 - elapsed
+                );
+                return false;
+            }
+        }
+    }
+
     let over_threshold = usage_window_over_threshold(usage, threshold);
 
-    if over_threshold {
+    if over_threshold || critical_usage {
         tracing::info!(
-            "Account {} crossed usage threshold: 5h={:?}, weekly={:?}, threshold={:.1}%",
+            "Account {} crossed usage threshold: 5h={:?}, weekly={:?}, threshold={:.1}%, critical={}",
             usage.account_id,
             usage.primary_used_percent,
             usage.secondary_used_percent,
-            threshold
+            threshold,
+            critical_usage
         );
     }
 
-    over_threshold
+    over_threshold || critical_usage
 }
 
 pub fn usage_is_critical(usage: &UsageInfo) -> bool {
@@ -305,7 +310,7 @@ fn should_defer_auto_switch(reason: SwitchReason, codex_busy: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::StoredAccount;
+    use crate::types::{AccountSettings, StoredAccount};
     use chrono::Utc;
 
     fn account(id: &str) -> StoredAccount {
@@ -445,13 +450,30 @@ mod tests {
     }
 
     #[test]
-    fn should_not_auto_switch_during_cooldown_even_if_weekly_exhausted() {
+    fn should_not_auto_switch_during_cooldown_for_non_critical_threshold_crossing() {
         let mut settings = settings();
         settings.global_cooldown_seconds = 300;
         settings.last_auto_switch = Some(Utc::now());
-        let usage = usage("active", 20.0, 100.0);
+        settings
+            .account_settings
+            .insert("active".to_string(), AccountSettings { switch_threshold: 80.0 });
+        let usage = usage("active", 85.0, 20.0);
 
         assert!(!should_auto_switch(
+            &usage,
+            &settings,
+            &store("active", &["active"])
+        ));
+    }
+
+    #[test]
+    fn critical_remaining_usage_bypasses_cooldown() {
+        let mut settings = settings();
+        settings.global_cooldown_seconds = 300;
+        settings.last_auto_switch = Some(Utc::now());
+        let usage = usage("active", 95.0, 20.0);
+
+        assert!(should_auto_switch(
             &usage,
             &settings,
             &store("active", &["active"])

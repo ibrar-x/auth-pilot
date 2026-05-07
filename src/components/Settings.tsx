@@ -1,28 +1,13 @@
 import { type KeyboardEvent, useState } from "react";
 import type { AppSettings, AccountWithUsage } from "../types";
 import { invokeBackend } from "../lib/platform";
+import { applyTheme } from "../lib/theme";
 
 interface SettingsProps {
   settings: AppSettings;
   onSave: (settings: AppSettings) => Promise<void>;
   onClose: () => void;
   accounts: AccountWithUsage[];
-}
-
-function applyTheme(theme: string) {
-  const root = document.documentElement;
-  if (theme === "dark") {
-    root.classList.add("dark");
-  } else if (theme === "light") {
-    root.classList.remove("dark");
-  } else {
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    if (mql.matches) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-  }
 }
 
 const THEMES = [

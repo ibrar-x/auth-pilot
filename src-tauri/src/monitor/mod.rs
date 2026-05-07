@@ -36,7 +36,7 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                 state_guard.settings.poll_interval_seconds
             };
 
-            let mut critical_switch_deferred = false;
+            let mut critical_switch_pending = false;
 
             match load_accounts_with_current_active() {
                 Ok(store) => {
@@ -60,6 +60,8 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                             let critical_usage = auto_switch::usage_is_critical(usage);
                             let should_switch = {
                                 let state_guard = state.read().await;
+                                critical_switch_pending =
+                                    critical_usage && state_guard.settings.auto_switch_enabled;
                                 auto_switch::should_auto_switch(
                                     usage,
                                     &state_guard.settings,
@@ -72,9 +74,11 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                             if should_switch {
                                 match auto_switch::trigger(active_id, &app_handle, &state).await {
                                     Ok(auto_switch::TriggerOutcome::Deferred) => {
-                                        critical_switch_deferred = critical_usage;
+                                        critical_switch_pending = critical_usage;
                                     }
-                                    Ok(auto_switch::TriggerOutcome::Switched) => {}
+                                    Ok(auto_switch::TriggerOutcome::Switched) => {
+                                        critical_switch_pending = false;
+                                    }
                                     Err(e) => {
                                         tracing::error!("Auto-switch failed: {}", e);
                                     }
@@ -90,7 +94,7 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
 
             sleep(Duration::from_secs(next_poll_interval_seconds(
                 poll_interval,
-                critical_switch_deferred,
+                critical_switch_pending,
                 true,
             )))
             .await;
@@ -110,10 +114,10 @@ pub fn stop_monitor() {
 
 fn next_poll_interval_seconds(
     configured_interval_seconds: u64,
-    critical_switch_deferred: bool,
+    critical_switch_pending: bool,
     fast_retry_enabled: bool,
 ) -> u64 {
-    if critical_switch_deferred && fast_retry_enabled {
+    if critical_switch_pending && fast_retry_enabled {
         return 5;
     }
 

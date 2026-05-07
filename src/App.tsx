@@ -2,24 +2,9 @@ import { useState, useEffect } from "react";
 import { Dashboard, TrayPopup } from "./components";
 import { invokeBackend, isTauriRuntime } from "./lib/platform";
 import { getDashboardShortcut, registerDashboardShortcut } from "./lib/dashboardShortcut";
+import { applyTheme } from "./lib/theme";
 import type { AppSettings } from "./types";
 import "./App.css";
-
-function applyTheme(theme: string) {
-  const root = document.documentElement;
-  if (theme === "dark") {
-    root.classList.add("dark");
-  } else if (theme === "light") {
-    root.classList.remove("dark");
-  } else {
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    if (mql.matches) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-  }
-}
 
 function App() {
   const [firstRunRequired, setFirstRunRequired] = useState(false);
@@ -91,17 +76,43 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
     if (!isTauriRuntime()) {
       applyTheme("system");
       return;
     }
+
     invokeBackend<AppSettings>("get_settings")
       .then((settings) => {
-        applyTheme(settings.theme || "system");
+        if (!disposed) applyTheme(settings.theme || "system");
       })
       .catch(() => {
-        applyTheme("system");
+        if (!disposed) applyTheme("system");
       });
+
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<AppSettings>("settings-updated", (event) => {
+          applyTheme(event.payload.theme || "system");
+        })
+      )
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to listen for theme setting updates:", err);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
