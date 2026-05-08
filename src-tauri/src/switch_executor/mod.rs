@@ -112,11 +112,15 @@ enum SwitchMode {
 }
 
 fn switch_mode_for_settings(settings: &AppSettings, proxy_healthy: bool) -> SwitchMode {
-    if settings.proxy_mode_enabled && proxy_healthy {
+    if desktop_proxy_auth_injection_supported() && settings.proxy_mode_enabled && proxy_healthy {
         SwitchMode::ProxyHotSwap
     } else {
         SwitchMode::RestartCodex
     }
+}
+
+fn desktop_proxy_auth_injection_supported() -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -124,7 +128,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn proxy_mode_hot_swaps_when_enabled_and_proxy_healthy() {
+    fn proxy_mode_restarts_codex_until_desktop_proxy_can_inject_auth() {
         let settings = AppSettings {
             proxy_mode_enabled: true,
             ..AppSettings::default()
@@ -132,7 +136,7 @@ mod tests {
 
         assert_eq!(
             switch_mode_for_settings(&settings, true),
-            SwitchMode::ProxyHotSwap
+            SwitchMode::RestartCodex
         );
     }
 
