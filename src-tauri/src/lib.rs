@@ -19,7 +19,7 @@ pub mod tray;
 pub mod types;
 
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::RwLock;
 
 use commands::{
@@ -28,7 +28,9 @@ use commands::{
     get_active_account_info, get_masked_account_ids, get_settings, get_switch_log,
     get_tray_popup_data, get_usage, import_accounts_full_encrypted_file, import_accounts_slim_text,
     is_file_auth_mode_required, list_accounts, manual_switch_account, open_settings,
-    popup_switch_account, quit_app, refresh_account_metadata, refresh_all_accounts_usage,
+    popup_switch_account, quit_app, recovery_background_resume, recovery_copy_prompt,
+    recovery_ignore, recovery_list_interrupted, recovery_open_log, recovery_reopen,
+    recovery_resume_available, refresh_account_metadata, refresh_all_accounts_usage,
     rename_account, save_settings, set_masked_account_ids, show_main_window, start_login,
     switch_account, tray_popup_interaction, warmup_account, warmup_all_accounts,
 };
@@ -70,6 +72,13 @@ pub fn run() {
                     ) {
                         tracing::warn!("Failed to mark stale recovery sessions: {err}");
                     }
+                    if let Ok(interrupted) =
+                        db.query_by_status(crate::recovery::SessionStatus::Interrupted)
+                    {
+                        for session in interrupted {
+                            let _ = app.handle().emit("recovery:session-interrupted", &session);
+                        }
+                    }
                 }
                 Err(err) => tracing::warn!("Failed to initialize recovery database: {err}"),
             }
@@ -102,6 +111,10 @@ pub fn run() {
 
             // Start background monitor
             monitor::start_monitor(app_handle.clone(), state);
+
+            if let Err(err) = crate::recovery::hook_watcher::start(app_handle.clone()) {
+                tracing::warn!("Failed to start Codex recovery hook watcher: {err}");
+            }
 
             Ok(())
         })
@@ -147,6 +160,14 @@ pub fn run() {
             show_main_window,
             open_settings,
             quit_app,
+            // Recovery
+            recovery_list_interrupted,
+            recovery_reopen,
+            recovery_copy_prompt,
+            recovery_background_resume,
+            recovery_ignore,
+            recovery_open_log,
+            recovery_resume_available,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

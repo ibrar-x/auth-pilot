@@ -91,6 +91,10 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                 }
             }
 
+            if let Err(err) = crate::recovery::process_watch::check_cycle(&app_handle) {
+                tracing::warn!("Recovery process check failed: {err}");
+            }
+
             sleep(Duration::from_secs(next_poll_interval_seconds(
                 poll_interval,
                 critical_switch_pending,

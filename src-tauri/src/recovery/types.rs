@@ -28,6 +28,22 @@ pub enum SessionStatus {
     BackgroundResumed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReopenOutcome {
+    DeeplinkOpened,
+    WorkspaceOpened,
+    ManualRequired { workspace_path: Option<String> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BackgroundResumeOutcome {
+    Started { log_path: String },
+    CooldownActive { seconds_remaining: i64 },
+    MaxAttemptsReached,
+}
+
 impl SessionStatus {
     pub(crate) fn as_str(self) -> &'static str {
         match self {

@@ -125,10 +125,20 @@ impl SessionDb {
     }
 
     pub fn update_status(&self, id: &str, status: SessionStatus) -> Result<()> {
-        self.conn.execute(
-            "UPDATE codex_sessions SET status = ?1 WHERE id = ?2",
-            params![status.as_str(), id],
-        )?;
+        match status {
+            SessionStatus::Completed | SessionStatus::Interrupted => {
+                self.conn.execute(
+                    "UPDATE codex_sessions SET status = ?1, ended_at = COALESCE(ended_at, ?2) WHERE id = ?3",
+                    params![status.as_str(), encode_time(Utc::now()), id],
+                )?;
+            }
+            _ => {
+                self.conn.execute(
+                    "UPDATE codex_sessions SET status = ?1 WHERE id = ?2",
+                    params![status.as_str(), id],
+                )?;
+            }
+        }
         Ok(())
     }
 

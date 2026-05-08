@@ -83,3 +83,36 @@ export interface ImportAccountsSummary {
   imported_count: number;
   skipped_count: number;
 }
+
+export type SessionStatus =
+  | "running"
+  | "completed"
+  | "interrupted"
+  | "ignored"
+  | "background_resumed";
+
+export interface CodexSession {
+  id: string;
+  thread_id: string | null;
+  session_id: string | null;
+  workspace_path: string;
+  account_id: string | null;
+  process_id: number | null;
+  started_at: string;
+  last_seen_at: string;
+  ended_at: string | null;
+  status: SessionStatus;
+  recovery_attempts: number;
+  last_recovery_at: string | null;
+  last_recovery_prompt: string | null;
+}
+
+export type ReopenOutcome =
+  | { type: "deeplink_opened" }
+  | { type: "workspace_opened" }
+  | { type: "manual_required"; data: { workspace_path: string | null } };
+
+export type BackgroundResumeOutcome =
+  | { type: "started"; data: { log_path: string } }
+  | { type: "cooldown_active"; data: { seconds_remaining: number } }
+  | { type: "max_attempts_reached" };

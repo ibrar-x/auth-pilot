@@ -3,7 +3,16 @@ import { invokeBackend } from "../lib/platform";
 import { getDashboardShortcut } from "../lib/dashboardShortcut";
 import { getMaskedText, getPrivacyMaskOptions } from "../lib/privacy";
 import { resolveTheme } from "../lib/theme";
-import type { AccountInfo, AppSettings, UsageDisplayMode, UsageInfo } from "../types";
+import { RecoveryCard } from "./RecoveryCard";
+import type {
+  AccountInfo,
+  AppSettings,
+  BackgroundResumeOutcome,
+  CodexSession,
+  ReopenOutcome,
+  UsageDisplayMode,
+  UsageInfo,
+} from "../types";
 
 interface PopupData {
   active_account: AccountInfo | null;
@@ -127,16 +136,24 @@ export function TrayPopup() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">(() => resolveTheme("system"));
+  const [recoverySessions, setRecoverySessions] = useState<CodexSession[]>([]);
+  const [recoveryIndex, setRecoveryIndex] = useState(0);
+  const [resumeAvailable, setResumeAvailable] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
-      const [result, settings] = await Promise.all([
+      const [result, settings, interrupted, canResume] = await Promise.all([
         invokeBackend<PopupData>("get_tray_popup_data"),
         invokeBackend<AppSettings>("get_settings").catch(() => null),
+        invokeBackend<CodexSession[]>("recovery_list_interrupted").catch(() => []),
+        invokeBackend<boolean>("recovery_resume_available").catch(() => false),
       ]);
       setData(result);
       setSettings(settings);
       setUsageDisplayMode(settings?.usage_display_mode ?? "remaining");
+      setRecoverySessions(interrupted);
+      setResumeAvailable(canResume);
+      setRecoveryIndex((current) => (interrupted.length === 0 ? 0 : Math.min(current, interrupted.length - 1)));
     } catch (err) {
       console.error("Failed to fetch popup data:", err);
     } finally {
@@ -174,12 +191,25 @@ export function TrayPopup() {
           setSettings(event.payload);
           setUsageDisplayMode(event.payload.usage_display_mode ?? "remaining");
         });
+        const recoveryInterruptedUnlisten = await listen("recovery:session-interrupted", () => {
+          fetchData();
+        });
+        const recoveryResolvedUnlisten = await listen("recovery:session-resolved", () => {
+          fetchData();
+        });
 
         if (disposed) {
           accountUnlisten();
           settingsUnlisten();
+          recoveryInterruptedUnlisten();
+          recoveryResolvedUnlisten();
         } else {
-          unlisteners.push(accountUnlisten, settingsUnlisten);
+          unlisteners.push(
+            accountUnlisten,
+            settingsUnlisten,
+            recoveryInterruptedUnlisten,
+            recoveryResolvedUnlisten
+          );
         }
       })
       .catch((err) => {
@@ -261,6 +291,34 @@ export function TrayPopup() {
     invokeBackend("open_settings").catch(() => {});
   };
 
+  const handleRecoveryReopen = async (session: CodexSession): Promise<ReopenOutcome | null> => {
+    const outcome = await invokeBackend<ReopenOutcome>("recovery_reopen", { sessionId: session.id });
+    await fetchData();
+    return outcome;
+  };
+
+  const handleRecoveryCopyPrompt = async () => {
+    const prompt = await invokeBackend<string>("recovery_copy_prompt");
+    await navigator.clipboard.writeText(prompt);
+  };
+
+  const handleRecoveryIgnore = async (session: CodexSession) => {
+    await invokeBackend("recovery_ignore", { sessionId: session.id });
+    await fetchData();
+  };
+
+  const handleRecoveryBackgroundResume = async (
+    session: CodexSession
+  ): Promise<BackgroundResumeOutcome | null> => {
+    const confirmed = window.confirm("Resume Codex in the background through the CLI? Output will be written to a recovery log, not shown live in Codex Desktop.");
+    if (!confirmed) return null;
+    const outcome = await invokeBackend<BackgroundResumeOutcome>("recovery_background_resume", {
+      sessionId: session.id,
+    });
+    await fetchData();
+    return outcome;
+  };
+
   const handleTogglePrivacy = async () => {
     if (!settings) return;
 
@@ -296,9 +354,37 @@ export function TrayPopup() {
   const activeAccountName = data.active_account
     ? getMaskedText(data.active_account.name, privacyMask)
     : null;
+  const activeRecoverySession =
+    recoverySessions.length > 0 ? recoverySessions[recoveryIndex] : null;
 
   return (
     <div style={{ width: "100%", height: "100%", background: colors.bg, borderRadius: 4, border: `0.5px solid ${colors.border}`, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", overflow: "hidden", userSelect: "none", display: "flex", flexDirection: "column", boxSizing: "border-box" }} onPointerDownCapture={markPopupInteraction} onMouseDown={(e) => e.stopPropagation()}>
+      {activeRecoverySession && (
+        <RecoveryCard
+          session={activeRecoverySession}
+          index={recoveryIndex}
+          total={recoverySessions.length}
+          resumeAvailable={resumeAvailable}
+          colors={colors}
+          onPrevious={() =>
+            setRecoveryIndex((current) =>
+              recoverySessions.length === 0
+                ? 0
+                : (current - 1 + recoverySessions.length) % recoverySessions.length
+            )
+          }
+          onNext={() =>
+            setRecoveryIndex((current) =>
+              recoverySessions.length === 0 ? 0 : (current + 1) % recoverySessions.length
+            )
+          }
+          onReopen={() => handleRecoveryReopen(activeRecoverySession).catch((err) => console.error("Recovery reopen failed:", err))}
+          onCopyPrompt={handleRecoveryCopyPrompt}
+          onIgnore={() => handleRecoveryIgnore(activeRecoverySession).catch((err) => console.error("Recovery ignore failed:", err))}
+          onResume={() => handleRecoveryBackgroundResume(activeRecoverySession).catch((err) => console.error("Background recovery failed:", err))}
+        />
+      )}
+
       {data.active_account && (
         <div style={{ padding: "14px 14px 10px", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
