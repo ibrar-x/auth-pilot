@@ -406,7 +406,12 @@ mod tests {
             usage("also-weekly-empty", 20.0, 99.0),
         ];
 
-        assert!(all_accounts_depleted("active", &usages, &store, &settings()));
+        assert!(all_accounts_depleted(
+            "active",
+            &usages,
+            &store,
+            &settings()
+        ));
     }
 
     #[test]
@@ -464,9 +469,12 @@ mod tests {
         let mut settings = settings();
         settings.global_cooldown_seconds = 300;
         settings.last_auto_switch = Some(Utc::now());
-        settings
-            .account_settings
-            .insert("active".to_string(), AccountSettings { switch_threshold: 80.0 });
+        settings.account_settings.insert(
+            "active".to_string(),
+            AccountSettings {
+                switch_threshold: 80.0,
+            },
+        );
         let usage = usage("active", 85.0, 20.0);
 
         assert!(!should_auto_switch(

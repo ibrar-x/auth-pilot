@@ -1,13 +1,15 @@
 //! Process management for Codex Desktop App
 
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use tokio::time::sleep;
+use uuid::Uuid;
 
 const CODEX_RECENT_ACTIVITY_SECONDS: i64 = 120;
 const CODEX_SESSION_ACTIVITY_SECONDS: i64 = 300;
@@ -20,6 +22,13 @@ struct ProcessInfo {
     pid: u32,
     ppid: u32,
     command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentCodexSession {
+    pub session_id: Uuid,
+    pub transcript_path: PathBuf,
+    pub workspace_path: Option<PathBuf>,
 }
 
 /// Check if Codex Desktop App is running using osascript
@@ -124,6 +133,178 @@ pub async fn launch_codex_desktop() -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn resume_codex_session_continue(session: &RecentCodexSession) -> Result<()> {
+    tracing::info!(
+        "Resuming Codex session {} from {}",
+        session.session_id,
+        session.transcript_path.display()
+    );
+
+    let mut command = Command::new("codex");
+    command.args([
+        "exec",
+        "resume",
+        &session.session_id.to_string(),
+        "continue",
+    ]);
+
+    if let Some(workspace_path) = &session.workspace_path {
+        command.current_dir(workspace_path);
+    }
+
+    command
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("Failed to spawn codex session resume command")?;
+
+    Ok(())
+}
+
+pub fn latest_recent_codex_session() -> Result<Option<RecentCodexSession>> {
+    let Some(home_dir) = dirs::home_dir() else {
+        return Ok(None);
+    };
+
+    let sessions_dir = home_dir.join(".codex").join("sessions");
+    if !sessions_dir.is_dir() {
+        return Ok(None);
+    }
+
+    latest_recent_codex_session_in(&sessions_dir)
+}
+
+fn latest_recent_codex_session_in(sessions_dir: &Path) -> Result<Option<RecentCodexSession>> {
+    let mut stack = vec![(sessions_dir.to_path_buf(), 0usize)];
+    let mut files_scanned = 0usize;
+    let mut latest: Option<(SystemTime, PathBuf, Uuid)> = None;
+
+    while let Some((path, depth)) = stack.pop() {
+        if depth > MAX_SESSION_SCAN_DEPTH {
+            continue;
+        }
+
+        let entries = match fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(err) => {
+                tracing::debug!(
+                    "Unable to read Codex session path {}: {err}",
+                    path.display()
+                );
+                continue;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+
+            if metadata.is_dir() {
+                stack.push((entry_path, depth + 1));
+                continue;
+            }
+
+            if !metadata.is_file() || !is_rollout_jsonl_path(&entry_path) {
+                continue;
+            }
+
+            files_scanned += 1;
+            if files_scanned > MAX_SESSION_FILES_SCANNED {
+                tracing::debug!(
+                    "Stopped Codex session scan after {MAX_SESSION_FILES_SCANNED} files"
+                );
+                break;
+            }
+
+            let Some(session_id) = session_id_from_rollout_path(&entry_path) else {
+                continue;
+            };
+
+            let Ok(modified_at) = metadata.modified() else {
+                continue;
+            };
+
+            let should_replace =
+                latest
+                    .as_ref()
+                    .is_none_or(|(latest_modified_at, latest_path, _)| {
+                        modified_at > *latest_modified_at
+                            || (modified_at == *latest_modified_at && entry_path > *latest_path)
+                    });
+
+            if should_replace {
+                latest = Some((modified_at, entry_path, session_id));
+            }
+        }
+    }
+
+    let Some((_, transcript_path, session_id)) = latest else {
+        return Ok(None);
+    };
+
+    Ok(Some(RecentCodexSession {
+        session_id,
+        workspace_path: workspace_path_from_transcript(&transcript_path)?,
+        transcript_path,
+    }))
+}
+
+fn session_id_from_rollout_path(path: &Path) -> Option<Uuid> {
+    let file_stem = path.file_stem()?.to_str()?;
+    let suffix = last_n_chars(file_stem, 36)?;
+
+    Uuid::parse_str(&suffix).ok()
+}
+
+fn last_n_chars(value: &str, count: usize) -> Option<String> {
+    let chars: Vec<char> = value.chars().rev().take(count).collect();
+    if chars.len() != count {
+        return None;
+    }
+
+    Some(chars.into_iter().rev().collect())
+}
+
+fn is_rollout_jsonl_path(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    file_name.starts_with("rollout-") && file_name.ends_with(".jsonl")
+}
+
+fn workspace_path_from_transcript(transcript_path: &Path) -> Result<Option<PathBuf>> {
+    let file = fs::File::open(transcript_path)
+        .with_context(|| format!("Failed to open transcript {}", transcript_path.display()))?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines().take(25) {
+        let line = line
+            .with_context(|| format!("Failed to read transcript {}", transcript_path.display()))?;
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+
+        if value.get("type").and_then(|kind| kind.as_str()) != Some("session_meta") {
+            continue;
+        }
+
+        let Some(cwd) = value
+            .get("payload")
+            .and_then(|payload| payload.get("cwd"))
+            .and_then(|cwd| cwd.as_str())
+        else {
+            return Ok(None);
+        };
+
+        return Ok(Some(PathBuf::from(cwd)));
+    }
+
+    Ok(None)
 }
 
 fn parse_process_snapshot(output: &str) -> Vec<ProcessInfo> {
@@ -477,6 +658,62 @@ mod tests {
 
         let _ = fs::remove_dir_all(&sessions_dir);
         assert!(!active);
+    }
+
+    #[test]
+    fn extracts_session_id_from_rollout_uuid_suffix() {
+        let session_id = uuid::Uuid::new_v4();
+        let path = Path::new("/tmp/rollout-2026-05-08T12-00-00-")
+            .with_file_name(format!("rollout-2026-05-08T12-00-00-{session_id}.jsonl"));
+
+        assert_eq!(session_id_from_rollout_path(&path), Some(session_id));
+    }
+
+    #[test]
+    fn ignores_rollout_paths_without_valid_uuid_suffix() {
+        let path = Path::new("/tmp/rollout-2026-05-08T12-00-00-not-a-session.jsonl");
+
+        assert_eq!(session_id_from_rollout_path(path), None);
+    }
+
+    #[test]
+    fn selects_newest_recent_codex_session_with_valid_uuid_suffix() {
+        let sessions_dir =
+            std::env::temp_dir().join(format!("authpilot-session-test-{}", uuid::Uuid::new_v4()));
+        let old_dir = sessions_dir.join("2026").join("05").join("07");
+        let new_dir = sessions_dir.join("2026").join("05").join("08");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::create_dir_all(&new_dir).unwrap();
+
+        let old_session_id = uuid::Uuid::new_v4();
+        let new_session_id = uuid::Uuid::new_v4();
+        fs::write(
+            old_dir.join(format!(
+                "rollout-2026-05-07T10-00-00-{old_session_id}.jsonl"
+            )),
+            "{}\n",
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        let new_transcript_path = new_dir.join(format!(
+            "rollout-2026-05-08T10-00-00-{new_session_id}.jsonl"
+        ));
+        fs::write(&new_transcript_path, "{}\n").unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        fs::write(
+            new_dir.join("rollout-2026-05-08T11-00-00-not-a-session.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+
+        let session = latest_recent_codex_session_in(&sessions_dir)
+            .unwrap()
+            .unwrap();
+
+        let _ = fs::remove_dir_all(&sessions_dir);
+        assert_eq!(session.session_id, new_session_id);
+        assert_eq!(session.transcript_path, new_transcript_path);
+        assert_eq!(session.workspace_path, None);
     }
 
     #[test]

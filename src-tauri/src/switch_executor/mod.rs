@@ -24,6 +24,17 @@ pub async fn execute_switch(
 
     // 2. Detect if Codex is running
     let was_running = process::is_codex_desktop_running().unwrap_or(false);
+    let recent_codex_session = if was_running {
+        match process::latest_recent_codex_session() {
+            Ok(session) => session,
+            Err(err) => {
+                tracing::warn!("Failed to capture recent Codex session before switch: {err}");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // 3. Notify user
     if was_running {
@@ -50,6 +61,13 @@ pub async fn execute_switch(
 
         if let Err(e) = process::launch_codex_desktop().await {
             tracing::error!("Failed to launch Codex: {}", e);
+        } else if let Some(session) = recent_codex_session {
+            if let Err(err) = process::resume_codex_session_continue(&session) {
+                tracing::warn!(
+                    "Failed to resume Codex session {} after switch: {err}",
+                    session.session_id
+                );
+            }
         }
     }
 

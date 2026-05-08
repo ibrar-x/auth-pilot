@@ -279,20 +279,13 @@ fn build_tray_menu(
             }
             let usage = usages.iter().find(|u| u.account_id == account.id);
             let account_name = private_account_name(&account.name, settings);
-            let label = if let Some(u) = usage {
-                format!(
-                    "{} — 5h: {}",
-                    account_name,
-                    format_window_percent(u.primary_used_percent, usage_display_mode)
-                )
-            } else {
-                format!("{account_name} — loading...")
-            };
+            let (label, enabled) =
+                inactive_account_menu_state(&account_name, usage, &account.id, settings);
             let item = MenuItem::with_id(
                 app,
                 format!("switch_{}", account.id),
                 label,
-                true,
+                enabled,
                 None::<&str>,
             )?;
             menu.append(&item)?;
@@ -329,6 +322,81 @@ fn private_account_name(name: &str, settings: &AppSettings) -> String {
         }
         PrivacyMaskStyle::Blur => "••••••".to_string(),
     }
+}
+
+fn inactive_account_menu_state(
+    account_name: &str,
+    usage: Option<&UsageInfo>,
+    account_id: &str,
+    settings: &AppSettings,
+) -> (String, bool) {
+    let Some(usage) = usage else {
+        return (
+            format!("{account_name} — 5h: loading... | 7-day: loading..."),
+            false,
+        );
+    };
+
+    let label = format!(
+        "{} — 5h: {} | 7-day: {}",
+        account_name,
+        format_tray_window_percent(
+            usage.primary_used_percent,
+            settings.usage_display_mode,
+            false
+        ),
+        format_tray_window_percent(
+            usage.secondary_used_percent,
+            settings.usage_display_mode,
+            true
+        )
+    );
+
+    let enabled = !usage_at_or_above_account_threshold(usage, account_id, settings);
+
+    (label, enabled)
+}
+
+fn format_tray_window_percent(
+    percent_used: Option<f64>,
+    usage_display_mode: UsageDisplayMode,
+    is_secondary_window: bool,
+) -> String {
+    let Some(percent_used) = percent_used else {
+        return "loading...".to_string();
+    };
+
+    if is_secondary_window && percent_used >= 100.0 {
+        return "Weekly limit reached".to_string();
+    }
+
+    format_window_percent(Some(percent_used), usage_display_mode)
+}
+
+fn usage_at_or_above_account_threshold(
+    usage: &UsageInfo,
+    account_id: &str,
+    settings: &AppSettings,
+) -> bool {
+    if usage.error.is_some()
+        || usage.primary_used_percent.is_none()
+        || usage.secondary_used_percent.is_none()
+    {
+        return true;
+    }
+
+    let threshold = settings
+        .account_settings
+        .get(account_id)
+        .map(|settings| settings.switch_threshold)
+        .unwrap_or(95.0);
+
+    usage
+        .primary_used_percent
+        .is_some_and(|used| used >= threshold)
+        || usage
+            .secondary_used_percent
+            .is_some_and(|used| used >= threshold)
 }
 
 fn format_window_percent(
@@ -388,4 +456,81 @@ fn show_dashboard(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         window.set_focus()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::AccountSettings;
+
+    fn usage(account_id: &str, primary: Option<f64>, secondary: Option<f64>) -> UsageInfo {
+        UsageInfo {
+            account_id: account_id.to_string(),
+            plan_type: Some("plus".to_string()),
+            primary_used_percent: primary,
+            primary_window_minutes: Some(300),
+            primary_resets_at: Some(1_700_000_000),
+            secondary_used_percent: secondary,
+            secondary_window_minutes: Some(10_080),
+            secondary_resets_at: Some(1_700_600_000),
+            has_credits: None,
+            unlimited_credits: None,
+            credits_balance: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn inactive_account_label_shows_both_windows_and_weekly_exhausted_text() {
+        let settings = AppSettings::default();
+        let usage = usage("account-1", Some(69.0), Some(100.0));
+
+        let (label, enabled) =
+            inactive_account_menu_state("Account", Some(&usage), "account-1", &settings);
+
+        assert_eq!(
+            label,
+            "Account — 5h: 31% left | 7-day: Weekly limit reached"
+        );
+        assert!(!enabled);
+    }
+
+    #[test]
+    fn inactive_account_label_uses_loading_for_missing_window_percent() {
+        let settings = AppSettings::default();
+        let usage = usage("account-1", Some(69.0), None);
+
+        let (label, enabled) =
+            inactive_account_menu_state("Account", Some(&usage), "account-1", &settings);
+
+        assert_eq!(label, "Account — 5h: 31% left | 7-day: loading...");
+        assert!(!enabled);
+    }
+
+    #[test]
+    fn inactive_account_without_usage_is_disabled_while_loading() {
+        let settings = AppSettings::default();
+
+        let (label, enabled) = inactive_account_menu_state("Account", None, "account-1", &settings);
+
+        assert_eq!(label, "Account — 5h: loading... | 7-day: loading...");
+        assert!(!enabled);
+    }
+
+    #[test]
+    fn inactive_account_is_disabled_when_weekly_reaches_account_threshold() {
+        let mut settings = AppSettings::default();
+        settings.account_settings.insert(
+            "account-1".to_string(),
+            AccountSettings {
+                switch_threshold: 80.0,
+            },
+        );
+        let usage = usage("account-1", Some(10.0), Some(80.0));
+
+        let (_, enabled) =
+            inactive_account_menu_state("Account", Some(&usage), "account-1", &settings);
+
+        assert!(!enabled);
+    }
 }

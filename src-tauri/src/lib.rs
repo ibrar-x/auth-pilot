@@ -10,6 +10,7 @@ pub mod commands;
 pub mod crypto;
 pub mod monitor;
 pub mod process;
+pub mod recovery;
 pub mod session;
 pub mod settings;
 pub mod switch_executor;
@@ -58,6 +59,23 @@ pub fn run() {
             // Migrate legacy accounts from ~/.codex-switcher/ if needed
             if let Err(e) = crate::auth::storage::migrate_legacy_accounts() {
                 tracing::warn!("Legacy account migration failed or skipped: {}", e);
+            }
+
+            match crate::recovery::default_db_path()
+                .and_then(|path| crate::recovery::session_db::SessionDb::open(&path))
+            {
+                Ok(db) => {
+                    if let Err(err) = db.mark_stale_sessions_interrupted(
+                        chrono::Utc::now() - chrono::Duration::seconds(120),
+                    ) {
+                        tracing::warn!("Failed to mark stale recovery sessions: {err}");
+                    }
+                }
+                Err(err) => tracing::warn!("Failed to initialize recovery database: {err}"),
+            }
+
+            if let Err(err) = crate::recovery::hooks::install_hook_script() {
+                tracing::warn!("Failed to install Codex recovery hooks: {err}");
             }
 
             let app_handle = app.handle().clone();
