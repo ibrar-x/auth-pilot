@@ -9,6 +9,8 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use tokio::time::sleep;
 
+use crate::types::CodexActivityReport;
+
 const CODEX_RECENT_ACTIVITY_SECONDS: i64 = 120;
 const CODEX_SESSION_ACTIVITY_SECONDS: i64 = 300;
 const CODEX_TIMESTAMP_MARKER: &str = "event.timestamp=";
@@ -39,6 +41,20 @@ pub fn is_codex_desktop_running() -> Result<bool> {
 /// is still running. This is intentionally conservative: if a non-background
 /// process is descended from the Codex app process tree, the caller should defer.
 pub fn is_codex_desktop_busy() -> Result<bool> {
+    Ok(codex_activity_report_result()?.busy)
+}
+
+pub fn codex_activity_report() -> CodexActivityReport {
+    match codex_activity_report_result() {
+        Ok(report) => report,
+        Err(err) => CodexActivityReport {
+            inspection_error: Some(err.to_string()),
+            ..CodexActivityReport::default()
+        },
+    }
+}
+
+fn codex_activity_report_result() -> Result<CodexActivityReport> {
     let output = Command::new("ps")
         .args(["-axo", "pid=,ppid=,command="])
         .output()
@@ -52,29 +68,28 @@ pub fn is_codex_desktop_busy() -> Result<bool> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let processes = parse_process_snapshot(&stdout);
 
-    if has_active_codex_cli_process(&processes) {
-        return Ok(true);
-    }
+    let recent_session_file_activity =
+        codex_session_files_have_recent_activity().or_else(|err| {
+            tracing::debug!("Unable to inspect Codex session files: {err}");
+            Ok::<bool, anyhow::Error>(false)
+        })?;
 
-    if codex_session_files_have_recent_activity().or_else(|err| {
-        tracing::debug!("Unable to inspect Codex session files: {err}");
-        Ok::<bool, anyhow::Error>(false)
-    })? {
-        return Ok(true);
-    }
+    let desktop_running = is_codex_desktop_running()?;
+    let recent_desktop_log_activity = if desktop_running {
+        codex_logs_have_recent_activity().or_else(|err| {
+            tracing::debug!("Unable to inspect Codex activity logs: {err}");
+            Ok::<bool, anyhow::Error>(false)
+        })?
+    } else {
+        false
+    };
 
-    if !is_codex_desktop_running()? {
-        return Ok(false);
-    }
-
-    if codex_has_active_descendant_processes(&processes) {
-        return Ok(true);
-    }
-
-    codex_logs_have_recent_activity().or_else(|err| {
-        tracing::debug!("Unable to inspect Codex activity logs: {err}");
-        Ok(false)
-    })
+    Ok(codex_activity_report_from_processes(
+        &processes,
+        recent_session_file_activity,
+        recent_desktop_log_activity,
+        desktop_running,
+    ))
 }
 
 /// Kill Codex Desktop App gracefully using osascript, fallback to pkill
@@ -153,6 +168,31 @@ fn codex_has_active_descendant_processes(processes: &[ProcessInfo]) -> bool {
         .iter()
         .filter(|process| !is_ignored_codex_process(&process.command))
         .any(|process| has_codex_background_ancestor(process.ppid, processes))
+}
+
+fn codex_activity_report_from_processes(
+    processes: &[ProcessInfo],
+    recent_session_file_activity: bool,
+    recent_desktop_log_activity: bool,
+    desktop_running: bool,
+) -> CodexActivityReport {
+    let active_cli_process = has_active_codex_cli_process(processes);
+    let active_descendant_process =
+        desktop_running && codex_has_active_descendant_processes(processes);
+    let busy = active_cli_process
+        || active_descendant_process
+        || recent_session_file_activity
+        || recent_desktop_log_activity;
+
+    CodexActivityReport {
+        busy,
+        desktop_running,
+        active_cli_process,
+        active_descendant_process,
+        recent_session_file_activity,
+        recent_desktop_log_activity,
+        inspection_error: None,
+    }
 }
 
 fn has_active_codex_cli_process(processes: &[ProcessInfo]) -> bool {
@@ -495,5 +535,48 @@ mod tests {
             "event.timestamp=2026-05-06T09:55:00Z originator=Codex_Desktop session_task.turn";
 
         assert!(!codex_log_output_has_recent_activity(output, now, 120));
+    }
+
+    #[test]
+    fn activity_report_marks_busy_when_cli_process_is_active() {
+        let snapshot = r#"
+          200     1 /bin/zsh
+          201   200 /opt/homebrew/bin/codex exec run tests
+        "#;
+
+        let processes = parse_process_snapshot(snapshot);
+        let report = codex_activity_report_from_processes(&processes, false, false, true);
+
+        assert!(report.busy);
+        assert!(report.active_cli_process);
+        assert!(!report.active_descendant_process);
+        assert!(!report.recent_session_file_activity);
+        assert!(!report.recent_desktop_log_activity);
+    }
+
+    #[test]
+    fn activity_report_marks_idle_when_only_background_processes_exist() {
+        let snapshot = r#"
+          100     1 /Applications/Codex.app/Contents/MacOS/Codex
+          101   100 /Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled
+          102   101 /Applications/Codex.app/Contents/Resources/node_repl
+        "#;
+
+        let processes = parse_process_snapshot(snapshot);
+        let report = codex_activity_report_from_processes(&processes, false, false, true);
+
+        assert!(!report.busy);
+        assert!(report.desktop_running);
+    }
+
+    #[test]
+    fn activity_report_exposes_file_only_activity() {
+        let processes = Vec::new();
+        let report = codex_activity_report_from_processes(&processes, true, false, true);
+
+        assert!(report.busy);
+        assert!(report.recent_session_file_activity);
+        assert!(!report.active_cli_process);
+        assert!(!report.active_descendant_process);
     }
 }

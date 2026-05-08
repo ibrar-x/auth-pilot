@@ -13,7 +13,9 @@ use crate::session;
 use crate::settings;
 use crate::switch_executor;
 use crate::switch_log;
-use crate::types::{AccountsStore, AppSettings, SwitchEvent, SwitchReason, UsageInfo};
+use crate::types::{
+    AccountsStore, AppSettings, CodexActivityReport, SwitchEvent, SwitchReason, UsageInfo,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerOutcome {
@@ -38,9 +40,10 @@ pub fn should_auto_switch(
         .map(|s| s.switch_threshold)
         .unwrap_or(95.0);
 
-    if !usage_windows_complete(usage) {
+    let critical_usage = usage_is_critical(usage);
+    if !critical_usage && !usage_windows_complete(usage) {
         tracing::info!(
-            "Account {} missing 5h or weekly usage, skipping auto-switch decision: 5h={:?}, weekly={:?}",
+            "Account {} missing 5h or weekly usage, skipping non-critical auto-switch decision: 5h={:?}, weekly={:?}",
             usage.account_id,
             usage.primary_used_percent,
             usage.secondary_used_percent
@@ -48,7 +51,6 @@ pub fn should_auto_switch(
         return false;
     }
 
-    let critical_usage = usage_is_critical(usage);
     if !critical_usage {
         // Check global cooldown for ordinary threshold crossings. Critical
         // accounts keep retrying so Codex can be restarted as soon as it is idle.
@@ -82,12 +84,25 @@ pub fn should_auto_switch(
 
 pub fn usage_is_critical(usage: &UsageInfo) -> bool {
     usage_window_remaining_at_or_below(usage, CRITICAL_REMAINING_PERCENT)
+        || usage.primary_used_percent == Some(0.0)
+        || usage.secondary_used_percent == Some(0.0)
 }
 
 pub async fn trigger(
     active_account_id: String,
     app_handle: &AppHandle,
     state: &Arc<RwLock<crate::types::MonitorState>>,
+) -> Result<TriggerOutcome> {
+    let codex_activity = process::codex_activity_report();
+    trigger_with_activity_report(active_account_id, app_handle, state, codex_activity, false).await
+}
+
+pub async fn trigger_with_activity_report(
+    active_account_id: String,
+    app_handle: &AppHandle,
+    state: &Arc<RwLock<crate::types::MonitorState>>,
+    codex_activity: CodexActivityReport,
+    force_after_critical_grace: bool,
 ) -> Result<TriggerOutcome> {
     tracing::info!("Auto-switch triggered for account {}", active_account_id);
 
@@ -107,12 +122,18 @@ pub async fn trigger(
 
     tracing::info!("Selected target account: {}", target);
 
-    let codex_busy = process::is_codex_desktop_busy().unwrap_or_else(|err| {
-        tracing::warn!("Failed to inspect Codex activity before auto-switch: {err}");
-        false
-    });
+    tracing::info!("[monitor] gate: codex_busy_report={:?}", codex_activity);
+    let should_defer = if force_after_critical_grace {
+        codex_activity.active_cli_process || codex_activity.active_descendant_process
+    } else {
+        codex_activity.busy
+    };
 
-    if should_defer_auto_switch(reason, codex_busy) {
+    if should_defer_auto_switch(reason, should_defer) {
+        tracing::info!(
+            "[monitor] gate: deferred codex_busy, force={}",
+            force_after_critical_grace
+        );
         tracing::info!(
             "Auto-switch deferred for account {} because Codex still has active work",
             active_account_id
@@ -439,7 +460,7 @@ mod tests {
 
     #[test]
     fn should_not_auto_switch_when_active_weekly_usage_is_missing() {
-        let mut active_usage = usage("active", 100.0, 0.0);
+        let mut active_usage = usage("active", 20.0, 0.0);
         active_usage.secondary_used_percent = None;
 
         assert!(!should_auto_switch(
@@ -450,13 +471,55 @@ mod tests {
     }
 
     #[test]
+    fn critical_primary_usage_does_not_require_secondary_window() {
+        let mut active_usage = usage("active", 100.0, 20.0);
+        active_usage.secondary_used_percent = None;
+
+        assert!(usage_is_critical(&active_usage));
+        assert!(should_auto_switch(
+            &active_usage,
+            &settings(),
+            &store("active", &["active", "target"])
+        ));
+    }
+
+    #[test]
+    fn zero_primary_usage_with_missing_secondary_is_treated_as_api_exhausted_quirk() {
+        let mut active_usage = usage("active", 0.0, 20.0);
+        active_usage.secondary_used_percent = None;
+
+        assert!(usage_is_critical(&active_usage));
+        assert!(should_auto_switch(
+            &active_usage,
+            &settings(),
+            &store("active", &["active", "target"])
+        ));
+    }
+
+    #[test]
+    fn missing_secondary_still_blocks_non_critical_usage() {
+        let mut active_usage = usage("active", 20.0, 20.0);
+        active_usage.secondary_used_percent = None;
+
+        assert!(!usage_is_critical(&active_usage));
+        assert!(!should_auto_switch(
+            &active_usage,
+            &settings(),
+            &store("active", &["active", "target"])
+        ));
+    }
+
+    #[test]
     fn should_not_auto_switch_during_cooldown_for_non_critical_threshold_crossing() {
         let mut settings = settings();
         settings.global_cooldown_seconds = 300;
         settings.last_auto_switch = Some(Utc::now());
-        settings
-            .account_settings
-            .insert("active".to_string(), AccountSettings { switch_threshold: 80.0 });
+        settings.account_settings.insert(
+            "active".to_string(),
+            AccountSettings {
+                switch_threshold: 80.0,
+            },
+        );
         let usage = usage("active", 85.0, 20.0);
 
         assert!(!should_auto_switch(

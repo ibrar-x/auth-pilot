@@ -294,6 +294,10 @@ pub struct AppSettings {
     pub poll_interval_seconds: u64,
     pub notifications_enabled: bool,
     pub auto_switch_enabled: bool,
+    pub proxy_mode_enabled: bool,
+    pub proxy_port: u16,
+    pub proxy_cli_wrapper_enabled: bool,
+    pub proxy_ca_trusted: bool,
     pub global_cooldown_seconds: u64,
     pub last_auto_switch: Option<DateTime<Utc>>,
     pub account_settings: HashMap<String, AccountSettings>,
@@ -313,6 +317,10 @@ impl Default for AppSettings {
             poll_interval_seconds: 60,
             notifications_enabled: true,
             auto_switch_enabled: true,
+            proxy_mode_enabled: false,
+            proxy_port: 18080,
+            proxy_cli_wrapper_enabled: false,
+            proxy_ca_trusted: false,
             global_cooldown_seconds: 300,
             last_auto_switch: None,
             account_settings: HashMap::new(),
@@ -397,6 +405,47 @@ pub struct MonitorState {
     pub latest_usages: Vec<UsageInfo>,
     pub is_monitor_running: bool,
     pub cached_accounts: Option<AccountsStore>,
+    pub critical_auto_switch_since: Option<DateTime<Utc>>,
+    pub last_auto_switch_decision: Option<AutoSwitchDecisionReport>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CodexActivityReport {
+    pub busy: bool,
+    pub desktop_running: bool,
+    pub active_cli_process: bool,
+    pub active_descendant_process: bool,
+    pub recent_session_file_activity: bool,
+    pub recent_desktop_log_activity: bool,
+    pub inspection_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoSwitchDecisionKind {
+    Switched,
+    DeferredCodexBusy,
+    NoActiveAccount,
+    NoActiveUsage,
+    AutoSwitchDisabled,
+    UsageIncomplete,
+    BelowThreshold,
+    NoEligibleTarget,
+    SwitchFailed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoSwitchDecisionReport {
+    pub timestamp: DateTime<Utc>,
+    pub kind: AutoSwitchDecisionKind,
+    pub active_account_id: Option<String>,
+    pub target_account_id: Option<String>,
+    pub primary_used_percent: Option<f64>,
+    pub secondary_used_percent: Option<f64>,
+    pub critical_usage: bool,
+    pub threshold: Option<f64>,
+    pub message: String,
+    pub codex_activity: Option<CodexActivityReport>,
 }
 
 #[cfg(test)]
