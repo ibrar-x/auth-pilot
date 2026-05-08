@@ -43,10 +43,6 @@ export interface AppSettings {
   poll_interval_seconds: number;
   notifications_enabled: boolean;
   auto_switch_enabled: boolean;
-  proxy_mode_enabled?: boolean;
-  proxy_port?: number;
-  proxy_cli_wrapper_enabled?: boolean;
-  proxy_ca_trusted?: boolean;
   global_cooldown_seconds: number;
   last_auto_switch: string | null;
   account_settings: Record<string, AccountSettings>;
@@ -58,32 +54,6 @@ export interface AppSettings {
   privacy_mask_style?: PrivacyMaskStyle;
   privacy_replacement_text?: string;
   dashboard_global_shortcut?: string;
-}
-
-export interface CliWrapperStatus {
-  wrapper_path: string;
-  backup_path: string;
-  installed: boolean;
-  binary_installed: boolean;
-  shell_installed: boolean;
-  backup_exists: boolean;
-  real_codex_path: string | null;
-}
-
-export interface CaStatus {
-  cert_path: string;
-  key_path: string;
-  cert_exists: boolean;
-  key_exists: boolean;
-  ready: boolean;
-  trusted_by_authpilot: boolean;
-}
-
-export interface SystemProxyStatus {
-  supported: boolean;
-  enabled_from_authpilot: boolean;
-  modified_services: string[];
-  lockfile_exists: boolean;
 }
 
 export type UsageDisplayMode = "remaining" | "used";

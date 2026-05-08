@@ -6,19 +6,14 @@ pub mod api;
 pub mod app_behavior;
 pub mod auth;
 pub mod auto_switch;
-pub mod cert;
-pub mod cli_wrapper;
 pub mod commands;
 pub mod crypto;
-pub mod launchd;
 pub mod monitor;
 pub mod process;
-pub mod proxy;
 pub mod session;
 pub mod settings;
 pub mod switch_executor;
 pub mod switch_log;
-pub mod system_proxy;
 pub mod tray;
 pub mod types;
 
@@ -27,15 +22,12 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 
 use commands::{
-    add_account_from_file, cancel_login, complete_login, delete_account, disable_system_proxy,
-    enable_system_proxy, ensure_file_auth_mode, export_accounts_full_encrypted_file,
-    export_accounts_slim_text, export_settings, generate_proxy_ca, get_active_account_info,
-    get_cli_wrapper_status, get_launchd_status, get_masked_account_ids, get_proxy_ca_status,
-    get_settings, get_switch_log, get_system_proxy_status, get_tray_popup_data, get_usage,
-    import_accounts_full_encrypted_file, import_accounts_slim_text, install_cli_wrapper,
-    install_launchd_agent, install_proxy_ca_trust, is_file_auth_mode_required, list_accounts,
-    manual_switch_account, open_settings, popup_switch_account, quit_app, refresh_account_metadata,
-    refresh_all_accounts_usage, regenerate_proxy_ca, remove_cli_wrapper, remove_launchd_agent,
+    add_account_from_file, cancel_login, complete_login, delete_account, ensure_file_auth_mode,
+    export_accounts_full_encrypted_file, export_accounts_slim_text, export_settings,
+    get_active_account_info, get_masked_account_ids, get_settings, get_switch_log,
+    get_tray_popup_data, get_usage, import_accounts_full_encrypted_file, import_accounts_slim_text,
+    is_file_auth_mode_required, list_accounts, manual_switch_account, open_settings,
+    popup_switch_account, quit_app, refresh_account_metadata, refresh_all_accounts_usage,
     rename_account, save_settings, set_masked_account_ids, show_main_window, start_login,
     switch_account, tray_popup_interaction, warmup_account, warmup_all_accounts,
 };
@@ -45,7 +37,6 @@ use types::MonitorState;
 pub fn run() {
     // Setup tracing
     setup_logging();
-    let background = std::env::args().any(|arg| arg == "--background");
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -63,15 +54,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .setup(move |app| {
-            if background {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
-                }
-                #[cfg(target_os = "macos")]
-                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            }
-
+        .setup(|app| {
             // Migrate legacy accounts from ~/.codex-switcher/ if needed
             if let Err(e) = crate::auth::storage::migrate_legacy_accounts() {
                 tracing::warn!("Legacy account migration failed or skipped: {}", e);
@@ -90,29 +73,9 @@ pub fn run() {
                 latest_usages: Vec::new(),
                 is_monitor_running: false,
                 cached_accounts,
-                critical_auto_switch_since: None,
-                last_auto_switch_decision: None,
             }));
-            let proxy_runtime = proxy::runtime_state();
 
             app.manage(state.clone());
-            app.manage(proxy_runtime.clone());
-
-            {
-                let startup_settings = state.blocking_read().settings.clone();
-                let proxy_app_handle = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(err) = proxy::sync_runtime(
-                        proxy_runtime,
-                        &startup_settings,
-                        Some(proxy_app_handle),
-                    )
-                    .await
-                    {
-                        tracing::warn!("[proxy] startup sync failed: {err}");
-                    }
-                });
-            }
 
             // Setup tray
             if let Err(e) = tray::setup_tray(&app_handle, state.clone()) {
@@ -152,19 +115,6 @@ pub fn run() {
             get_settings,
             save_settings,
             export_settings,
-            install_cli_wrapper,
-            remove_cli_wrapper,
-            get_cli_wrapper_status,
-            install_launchd_agent,
-            remove_launchd_agent,
-            get_launchd_status,
-            get_proxy_ca_status,
-            generate_proxy_ca,
-            regenerate_proxy_ca,
-            install_proxy_ca_trust,
-            get_system_proxy_status,
-            enable_system_proxy,
-            disable_system_proxy,
             // Session
             ensure_file_auth_mode,
             is_file_auth_mode_required,
@@ -188,13 +138,6 @@ pub fn run() {
                 if let Err(err) = crate::app_behavior::show_main_window(app_handle) {
                     tracing::warn!("Failed to show dashboard after Dock reopen: {err}");
                 }
-            }
-
-            if let tauri::RunEvent::Exit = event {
-                if let Some(runtime) = app_handle.try_state::<proxy::SharedProxyRuntime>() {
-                    tauri::async_runtime::block_on(proxy::stop_runtime(runtime.inner().clone()));
-                }
-                system_proxy::disable_best_effort();
             }
         });
 }
