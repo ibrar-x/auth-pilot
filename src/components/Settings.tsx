@@ -60,6 +60,7 @@ function getDefaultSettings(): AppSettings {
     privacy_mask_style: "blur",
     privacy_replacement_text: "Hidden",
     dashboard_global_shortcut: DEFAULT_DASHBOARD_SHORTCUT,
+    auto_resume_after_restart: true,
   };
 }
 
@@ -344,6 +345,36 @@ export function Settings({ settings, onSave, onClose, accounts }: SettingsProps)
                 <span
                   className={`inline-block h-4 w-4 transform rounded-[4px] bg-white transition-transform ${
                     formSettings.start_at_login ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <label className="text-sm font-medium text-[#141413] dark:text-[#f3f0ee]">
+                  Resume Codex session after restart
+                </label>
+                <p className="text-xs text-[#696969] dark:text-[#9a9a9a] mt-1">
+                  After AuthPilot switches accounts and reopens Codex, automatically ask Codex to continue the most recent session.
+                </p>
+              </div>
+              <button
+                onClick={() =>
+                  setFormSettings((prev) => ({
+                    ...prev,
+                    auto_resume_after_restart: !(prev.auto_resume_after_restart ?? true),
+                  }))
+                }
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-[4px] transition-colors ${
+                  formSettings.auto_resume_after_restart ?? true
+                    ? "bg-[#141413] dark:bg-[#f3f0ee]"
+                    : "bg-[#D1CDC7] dark:bg-[#3a3a3a]"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-[4px] bg-white transition-transform ${
+                    formSettings.auto_resume_after_restart ?? true ? "translate-x-6" : "translate-x-1"
                   }`}
                 />
               </button>

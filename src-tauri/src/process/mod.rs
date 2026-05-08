@@ -1,5 +1,6 @@
 //! Process management for Codex Desktop App
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -18,10 +19,11 @@ const MAX_SESSION_SCAN_DEPTH: usize = 6;
 const MAX_SESSION_FILES_SCANNED: usize = 5000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ProcessInfo {
-    pid: u32,
-    ppid: u32,
-    command: String,
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub ppid: u32,
+    pub command: String,
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,18 +50,7 @@ pub fn is_codex_desktop_running() -> Result<bool> {
 /// is still running. This is intentionally conservative: if a non-background
 /// process is descended from the Codex app process tree, the caller should defer.
 pub fn is_codex_desktop_busy() -> Result<bool> {
-    let output = Command::new("ps")
-        .args(["-axo", "pid=,ppid=,command="])
-        .output()
-        .context("Failed to inspect process tree")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to inspect process tree: {}", stderr.trim());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let processes = parse_process_snapshot(&stdout);
+    let processes = fetch_process_list()?;
 
     if has_active_codex_cli_process(&processes) {
         return Ok(true);
@@ -84,6 +75,27 @@ pub fn is_codex_desktop_busy() -> Result<bool> {
         tracing::debug!("Unable to inspect Codex activity logs: {err}");
         Ok(false)
     })
+}
+
+pub fn fetch_process_list() -> Result<Vec<ProcessInfo>> {
+    let output = Command::new("ps")
+        .args(["-axo", "pid=,ppid=,command="])
+        .output()
+        .context("Failed to inspect process tree")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to inspect process tree: {}", stderr.trim());
+    }
+
+    let mut processes = parse_process_snapshot(&String::from_utf8_lossy(&output.stdout));
+    if let Ok(cwds) = fetch_process_cwds() {
+        for process in &mut processes {
+            process.cwd = cwds.get(&process.pid).cloned();
+        }
+    }
+
+    Ok(processes)
 }
 
 /// Kill Codex Desktop App gracefully using osascript, fallback to pkill
@@ -324,9 +336,57 @@ fn parse_process_snapshot(output: &str) -> Vec<ProcessInfo> {
                 .trim_start()
                 .to_string();
 
-            Some(ProcessInfo { pid, ppid, command })
+            Some(ProcessInfo {
+                pid,
+                ppid,
+                command,
+                cwd: None,
+            })
         })
         .collect()
+}
+
+fn fetch_process_cwds() -> Result<HashMap<u32, String>> {
+    let output = Command::new("lsof")
+        .args(["-nP", "-d", "cwd", "-F", "pn"])
+        .output()
+        .context("Failed to inspect process working directories")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "Failed to inspect process working directories: {}",
+            stderr.trim()
+        );
+    }
+
+    Ok(parse_lsof_cwd_snapshot(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn parse_lsof_cwd_snapshot(output: &str) -> HashMap<u32, String> {
+    let mut cwds = HashMap::new();
+    let mut current_pid = None;
+
+    for line in output.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let (kind, value) = line.split_at(1);
+
+        match kind {
+            "p" => current_pid = value.parse().ok(),
+            "n" => {
+                if let Some(pid) = current_pid {
+                    cwds.insert(pid, value.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    cwds
 }
 
 fn codex_has_active_descendant_processes(processes: &[ProcessInfo]) -> bool {
@@ -621,6 +681,27 @@ mod tests {
         let processes = parse_process_snapshot(snapshot);
 
         assert!(has_active_codex_cli_process(&processes));
+    }
+
+    #[test]
+    fn parses_lsof_cwd_snapshot_by_pid() {
+        let snapshot = r#"
+p100
+n/Users/example/project-one
+p101
+n/Users/example/project-two
+"#;
+
+        let cwds = parse_lsof_cwd_snapshot(snapshot);
+
+        assert_eq!(
+            cwds.get(&100),
+            Some(&"/Users/example/project-one".to_string())
+        );
+        assert_eq!(
+            cwds.get(&101),
+            Some(&"/Users/example/project-two".to_string())
+        );
     }
 
     #[test]

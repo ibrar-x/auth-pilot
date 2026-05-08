@@ -305,6 +305,7 @@ pub struct AppSettings {
     pub privacy_mask_style: PrivacyMaskStyle,
     pub privacy_replacement_text: String,
     pub dashboard_global_shortcut: String,
+    pub auto_resume_after_restart: bool,
 }
 
 impl Default for AppSettings {
@@ -324,6 +325,7 @@ impl Default for AppSettings {
             privacy_mask_style: PrivacyMaskStyle::Blur,
             privacy_replacement_text: String::from("Hidden"),
             dashboard_global_shortcut: String::from("CommandOrControl+Shift+A"),
+            auto_resume_after_restart: true,
         }
     }
 }
@@ -361,6 +363,18 @@ pub struct SwitchEvent {
     pub from_account_id: Option<String>,
     pub to_account_id: String,
     pub reason: SwitchReason,
+    #[serde(default)]
+    pub codex_was_running: bool,
+    #[serde(default)]
+    pub codex_stopped_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub codex_restarted_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub recovery_session_id: Option<String>,
+    #[serde(default)]
+    pub auto_resume_attempted: bool,
+    #[serde(default)]
+    pub auto_resume_started: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -397,6 +411,7 @@ pub struct MonitorState {
     pub latest_usages: Vec<UsageInfo>,
     pub is_monitor_running: bool,
     pub cached_accounts: Option<AccountsStore>,
+    pub last_hard_exhausted_auto_switch_attempt: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]

@@ -54,6 +54,7 @@ export interface AppSettings {
   privacy_mask_style?: PrivacyMaskStyle;
   privacy_replacement_text?: string;
   dashboard_global_shortcut?: string;
+  auto_resume_after_restart?: boolean;
 }
 
 export type UsageDisplayMode = "remaining" | "used";
@@ -68,6 +69,12 @@ export interface SwitchEvent {
   from_account_id: string | null;
   to_account_id: string;
   reason: "auto_limit_reached" | "auto_depleted" | "manual";
+  codex_was_running?: boolean;
+  codex_stopped_at?: string | null;
+  codex_restarted_at?: string | null;
+  recovery_session_id?: string | null;
+  auto_resume_attempted?: boolean;
+  auto_resume_started?: boolean;
 }
 
 export interface WarmupSummary {

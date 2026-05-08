@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type React from "react";
 import type { CodexSession } from "../types";
+import { RecoveryDialog } from "./RecoveryDialog";
 
 interface RecoveryCardProps {
   session: CodexSession;
@@ -39,6 +40,7 @@ export function RecoveryCard({
   onIgnore,
 }: RecoveryCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [confirmingResume, setConfirmingResume] = useState(false);
   const title = total > 1 ? `Session interrupted ${index + 1} of ${total}` : "Session interrupted";
   const workspace = useMemo(() => compactPath(session.workspace_path), [session.workspace_path]);
 
@@ -72,9 +74,19 @@ export function RecoveryCard({
             Background resume runs Codex through the CLI and writes output to a recovery log.
           </div>
           {resumeAvailable ? (
-            <ActionButton colors={colors} label="Resume in background" onClick={onResume} />
+            <ActionButton colors={colors} label="Resume in background" onClick={() => setConfirmingResume(true)} />
           ) : (
             <div style={{ color: colors.faint, fontSize: 9.5 }}>Background resume unavailable for this Codex CLI.</div>
+          )}
+          {confirmingResume && (
+            <RecoveryDialog
+              colors={colors}
+              onCancel={() => setConfirmingResume(false)}
+              onConfirm={() => {
+                setConfirmingResume(false);
+                onResume();
+              }}
+            />
           )}
         </div>
       )}

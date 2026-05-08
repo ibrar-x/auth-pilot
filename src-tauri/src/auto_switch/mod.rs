@@ -153,6 +153,12 @@ pub async fn trigger(
         from_account_id: Some(active_account_id),
         to_account_id: target,
         reason,
+        codex_was_running: false,
+        codex_stopped_at: None,
+        codex_restarted_at: None,
+        recovery_session_id: None,
+        auto_resume_attempted: false,
+        auto_resume_started: false,
     };
 
     let _ = app_handle.emit("auto-switch-triggered", &event);

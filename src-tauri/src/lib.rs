@@ -100,6 +100,7 @@ pub fn run() {
                 latest_usages: Vec::new(),
                 is_monitor_running: false,
                 cached_accounts,
+                last_hard_exhausted_auto_switch_attempt: None,
             }));
 
             app.manage(state.clone());

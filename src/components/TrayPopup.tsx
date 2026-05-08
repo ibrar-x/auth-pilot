@@ -310,8 +310,6 @@ export function TrayPopup() {
   const handleRecoveryBackgroundResume = async (
     session: CodexSession
   ): Promise<BackgroundResumeOutcome | null> => {
-    const confirmed = window.confirm("Resume Codex in the background through the CLI? Output will be written to a recovery log, not shown live in Codex Desktop.");
-    if (!confirmed) return null;
     const outcome = await invokeBackend<BackgroundResumeOutcome>("recovery_background_resume", {
       sessionId: session.id,
     });

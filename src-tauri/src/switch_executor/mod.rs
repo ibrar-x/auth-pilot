@@ -9,6 +9,7 @@ use tauri_plugin_notification::NotificationExt;
 use crate::auth::storage::{get_active_account, set_active_account, touch_account};
 use crate::process;
 use crate::session;
+use crate::settings;
 use crate::switch_log;
 use crate::types::{SwitchEvent, SwitchReason};
 
@@ -18,6 +19,13 @@ pub async fn execute_switch(
     app_handle: &AppHandle,
 ) -> Result<()> {
     let previous_active = get_active_account()?.map(|a| a.id);
+    let auto_resume_after_restart = settings::load_settings()
+        .map(|settings| settings.auto_resume_after_restart)
+        .unwrap_or(true);
+    let mut codex_stopped_at = None;
+    let mut codex_restarted_at = None;
+    let mut auto_resume_attempted = false;
+    let mut auto_resume_started = false;
 
     // 1. Write auth.json
     session::swap_active_auth(target_account_id).context("Failed to swap auth.json")?;
@@ -53,6 +61,7 @@ pub async fn execute_switch(
 
     // 4. Kill and relaunch Codex if running
     if was_running {
+        codex_stopped_at = Some(Utc::now());
         if let Err(e) = process::kill_codex_desktop().await {
             tracing::error!("Failed to kill Codex: {}", e);
         }
@@ -61,12 +70,20 @@ pub async fn execute_switch(
 
         if let Err(e) = process::launch_codex_desktop().await {
             tracing::error!("Failed to launch Codex: {}", e);
-        } else if let Some(session) = recent_codex_session {
-            if let Err(err) = process::resume_codex_session_continue(&session) {
-                tracing::warn!(
-                    "Failed to resume Codex session {} after switch: {err}",
-                    session.session_id
-                );
+        } else {
+            codex_restarted_at = Some(Utc::now());
+            if auto_resume_after_restart {
+                if let Some(session) = &recent_codex_session {
+                    auto_resume_attempted = true;
+                    if let Err(err) = process::resume_codex_session_continue(session) {
+                        tracing::warn!(
+                            "Failed to resume Codex session {} after switch: {err}",
+                            session.session_id
+                        );
+                    } else {
+                        auto_resume_started = true;
+                    }
+                }
             }
         }
     }
@@ -81,6 +98,12 @@ pub async fn execute_switch(
         from_account_id: previous_active,
         to_account_id: target_account_id.to_string(),
         reason,
+        codex_was_running: was_running,
+        codex_stopped_at,
+        codex_restarted_at,
+        recovery_session_id: recent_codex_session.map(|session| session.session_id.to_string()),
+        auto_resume_attempted,
+        auto_resume_started,
     };
 
     switch_log::append_switch_event(event.clone())?;
