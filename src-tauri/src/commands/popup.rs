@@ -56,6 +56,8 @@ pub async fn popup_switch_account(
         .await
         .map_err(|e| e.to_string())?;
 
+    crate::monitor::reset_after_manual_switch(&state).await;
+
     if let Ok(new_store) = load_accounts_with_current_active() {
         let mut state_guard = state.write().await;
         state_guard.cached_accounts = Some(new_store);

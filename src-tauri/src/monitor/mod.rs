@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter};
 use crate::api::usage::refresh_all_usage;
 use crate::auth::storage::load_accounts_with_current_active;
 use crate::auto_switch;
+use crate::settings;
 use crate::types::MonitorState;
 
 static MONITOR_CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -74,46 +75,67 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                             drop(store);
 
                             if should_switch {
-                                let retry_allowed = if hard_exhausted {
-                                    let should_retry = {
-                                        let state_guard = state.read().await;
-                                        hard_exhausted_retry_allowed(
-                                            state_guard.last_hard_exhausted_auto_switch_attempt,
-                                            Utc::now(),
-                                        )
-                                    };
+                                let active_still_current = current_active_account_matches_decision(
+                                    &active_id,
+                                )
+                                .unwrap_or_else(|err| {
+                                    tracing::warn!(
+                                        "Failed to re-check active account before auto-switch: {err}"
+                                    );
+                                    false
+                                });
 
-                                    if !should_retry {
-                                        tracing::info!(
+                                if !active_still_current {
+                                    tracing::info!(
+                                        "Auto-switch decision for account {} ignored because active account changed",
+                                        active_id
+                                    );
+                                    critical_switch_pending = false;
+                                    let mut state_guard = state.write().await;
+                                    state_guard.last_hard_exhausted_auto_switch_attempt = None;
+                                } else {
+                                    let retry_allowed = if hard_exhausted {
+                                        let should_retry = {
+                                            let state_guard = state.read().await;
+                                            hard_exhausted_retry_allowed(
+                                                state_guard.last_hard_exhausted_auto_switch_attempt,
+                                                Utc::now(),
+                                            )
+                                        };
+
+                                        if !should_retry {
+                                            tracing::info!(
                                             "Hard-exhausted auto-switch retry suppressed for account {}",
                                             active_id
                                         );
-                                        critical_switch_pending = false;
-                                        false
-                                    } else {
-                                        let mut state_guard = state.write().await;
-                                        state_guard.last_hard_exhausted_auto_switch_attempt =
-                                            Some(Utc::now());
-                                        true
-                                    }
-                                } else {
-                                    true
-                                };
-
-                                if retry_allowed {
-                                    match auto_switch::trigger(active_id, &app_handle, &state).await
-                                    {
-                                        Ok(auto_switch::TriggerOutcome::Deferred) => {
-                                            critical_switch_pending = critical_usage;
-                                        }
-                                        Ok(auto_switch::TriggerOutcome::Switched) => {
                                             critical_switch_pending = false;
+                                            false
+                                        } else {
                                             let mut state_guard = state.write().await;
                                             state_guard.last_hard_exhausted_auto_switch_attempt =
-                                                None;
+                                                Some(Utc::now());
+                                            true
                                         }
-                                        Err(e) => {
-                                            tracing::error!("Auto-switch failed: {}", e);
+                                    } else {
+                                        true
+                                    };
+
+                                    if retry_allowed {
+                                        match auto_switch::trigger(active_id, &app_handle, &state)
+                                            .await
+                                        {
+                                            Ok(auto_switch::TriggerOutcome::Deferred) => {
+                                                critical_switch_pending = critical_usage;
+                                            }
+                                            Ok(auto_switch::TriggerOutcome::Switched) => {
+                                                critical_switch_pending = false;
+                                                let mut state_guard = state.write().await;
+                                                state_guard
+                                                    .last_hard_exhausted_auto_switch_attempt = None;
+                                            }
+                                            Err(e) => {
+                                                tracing::error!("Auto-switch failed: {}", e);
+                                            }
                                         }
                                     }
                                 }
@@ -151,6 +173,39 @@ fn hard_exhausted_retry_allowed(last_attempt: Option<DateTime<Utc>>, now: DateTi
     };
 
     now.signed_duration_since(last_attempt).num_seconds() >= HARD_EXHAUSTED_RETRY_SECONDS
+}
+
+fn current_active_account_matches_decision(decision_account_id: &str) -> anyhow::Result<bool> {
+    let store = load_accounts_with_current_active()?;
+    Ok(active_account_matches_decision(
+        decision_account_id,
+        store.active_account_id.as_deref(),
+    ))
+}
+
+fn active_account_matches_decision(
+    decision_account_id: &str,
+    current_account_id: Option<&str>,
+) -> bool {
+    current_account_id == Some(decision_account_id)
+}
+
+fn apply_manual_switch_auto_reset(state: &mut MonitorState, now: DateTime<Utc>) {
+    state.settings.last_auto_switch = Some(now);
+    state.last_hard_exhausted_auto_switch_attempt = None;
+}
+
+pub async fn reset_after_manual_switch(state: &Arc<RwLock<MonitorState>>) {
+    let now = Utc::now();
+    if let Err(err) = settings::update_last_auto_switch(now) {
+        tracing::warn!("Failed to persist manual switch auto-switch cooldown reset: {err}");
+    }
+
+    let mut state_guard = state.write().await;
+    apply_manual_switch_auto_reset(&mut state_guard, now);
+    if let Ok(store) = load_accounts_with_current_active() {
+        state_guard.cached_accounts = Some(store);
+    }
 }
 
 pub fn stop_monitor() {
@@ -197,5 +252,27 @@ mod tests {
             Some(now - chrono::Duration::seconds(31)),
             now
         ));
+    }
+
+    #[test]
+    fn stale_auto_switch_decision_is_invalid_after_active_account_changes() {
+        assert!(!active_account_matches_decision(
+            "old-account",
+            Some("new-account")
+        ));
+    }
+
+    #[test]
+    fn manual_switch_reset_sets_cooldown_and_clears_hard_exhausted_retry() {
+        let now = Utc::now();
+        let mut state = MonitorState {
+            last_hard_exhausted_auto_switch_attempt: Some(now - chrono::Duration::seconds(5)),
+            ..MonitorState::default()
+        };
+
+        apply_manual_switch_auto_reset(&mut state, now);
+
+        assert_eq!(state.settings.last_auto_switch, Some(now));
+        assert_eq!(state.last_hard_exhausted_auto_switch_attempt, None);
     }
 }

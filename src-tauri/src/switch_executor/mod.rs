@@ -27,8 +27,13 @@ pub async fn execute_switch(
     let mut auto_resume_attempted = false;
     let mut auto_resume_started = false;
 
-    // 1. Write auth.json
+    // 1. Write auth.json and publish the active account immediately.
+    // The Codex restart can take long enough for the monitor to tick again; if
+    // the in-app active account still points at the old critical account during
+    // that window, it can execute a stale auto-switch decision.
     session::swap_active_auth(target_account_id).context("Failed to swap auth.json")?;
+    set_active_account(target_account_id).context("Failed to update active account")?;
+    touch_account(target_account_id).context("Failed to update account last-used timestamp")?;
 
     // 2. Detect if Codex is running
     let was_running = process::is_codex_desktop_running().unwrap_or(false);
@@ -88,11 +93,7 @@ pub async fn execute_switch(
         }
     }
 
-    // 5. Update active account
-    set_active_account(target_account_id).context("Failed to update active account")?;
-    touch_account(target_account_id).context("Failed to update account last-used timestamp")?;
-
-    // 6. Log the switch
+    // 5. Log the switch
     let event = SwitchEvent {
         timestamp: Utc::now(),
         from_account_id: previous_active,
@@ -108,12 +109,12 @@ pub async fn execute_switch(
 
     switch_log::append_switch_event(event.clone())?;
 
-    // 7. Refresh tray state before notifying windows to reload.
+    // 6. Refresh tray state before notifying windows to reload.
     if let Err(err) = crate::tray::refresh_accounts_and_tray_menu(app_handle).await {
         tracing::warn!("Failed to refresh tray after switch: {err}");
     }
 
-    // 8. Emit events
+    // 7. Emit events
     let _ = app_handle.emit("account-switched", &event);
 
     tracing::info!(

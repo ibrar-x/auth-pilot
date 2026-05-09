@@ -3,9 +3,11 @@
 use crate::auth::{
     add_account, get_active_account, import_from_auth_json, import_from_auth_json_contents,
     load_accounts, load_accounts_with_current_active, remove_account, save_accounts,
-    set_active_account, touch_account,
 };
-use crate::types::{AccountInfo, AccountsStore, AuthData, ImportAccountsSummary, StoredAccount};
+use crate::types::{
+    AccountInfo, AccountsStore, AuthData, ImportAccountsSummary, MonitorState, StoredAccount,
+    SwitchReason,
+};
 
 use anyhow::Context;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -21,6 +23,9 @@ use sha2::Sha256;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
+use std::sync::Arc;
+use tauri::AppHandle;
+use tokio::sync::RwLock;
 
 const SLIM_EXPORT_PREFIX: &str = "css1.";
 const SLIM_FORMAT_VERSION: u8 = 1;
@@ -120,18 +125,16 @@ pub async fn add_account_from_auth_json_text(
 }
 
 #[tauri::command]
-pub async fn switch_account(account_id: String) -> Result<(), String> {
-    let store = load_accounts().map_err(|e| e.to_string())?;
+pub async fn switch_account(
+    account_id: String,
+    app_handle: AppHandle,
+    state: tauri::State<'_, Arc<RwLock<MonitorState>>>,
+) -> Result<(), String> {
+    crate::switch_executor::execute_switch(&account_id, SwitchReason::Manual, &app_handle)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let account = store
-        .accounts
-        .iter()
-        .find(|a| a.id == account_id)
-        .ok_or_else(|| format!("Account not found: {account_id}"))?;
-
-    crate::auth::switcher::switch_to_account(account).map_err(|e| e.to_string())?;
-    set_active_account(&account_id).map_err(|e| e.to_string())?;
-    touch_account(&account_id).map_err(|e| e.to_string())?;
+    crate::monitor::reset_after_manual_switch(&state).await;
 
     Ok(())
 }
