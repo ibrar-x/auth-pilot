@@ -24,6 +24,7 @@ export function Dashboard() {
     importFromFile,
     importAccountsSlimText,
     startOAuthLogin,
+    reloginAccount,
     completeOAuthLogin,
     cancelOAuthLogin,
     loadMaskedAccountIds,
@@ -329,6 +330,7 @@ export function Dashboard() {
                   onSwitch={() => {}}
                   onDelete={() => handleDelete(activeAccount.id)}
                   onRefresh={() => refreshSingleUsage(activeAccount.id, { refreshMetadata: true })}
+                  onRelogin={() => reloginAccount(activeAccount.id)}
                   onRename={(newName) => renameAccount(activeAccount.id, newName)}
                   switching={switchingId === activeAccount.id}
                   masked={maskedAccounts.has(activeAccount.id)}
@@ -353,6 +355,7 @@ export function Dashboard() {
                       onSwitch={() => handleSwitch(account.id)}
                       onDelete={() => handleDelete(account.id)}
                       onRefresh={() => refreshSingleUsage(account.id, { refreshMetadata: true })}
+                      onRelogin={() => reloginAccount(account.id)}
                       onRename={(newName) => renameAccount(account.id, newName)}
                       switching={switchingId === account.id}
                       masked={maskedAccounts.has(account.id)}

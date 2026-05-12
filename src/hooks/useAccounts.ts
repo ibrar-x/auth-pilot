@@ -285,6 +285,21 @@ export function useAccounts() {
     }
   }, []);
 
+  const reloginAccount = useCallback(
+    async (accountId: string) => {
+      const info = await invokeBackend<{ auth_url: string; callback_port: number }>(
+        "start_relogin",
+        { accountId }
+      );
+      window.open(info.auth_url, "_blank");
+      const account = await invokeBackend<AccountInfo>("complete_login");
+      const accountList = await loadAccounts();
+      await refreshUsage(accountList);
+      return account;
+    },
+    [loadAccounts, refreshUsage]
+  );
+
   const completeOAuthLogin = useCallback(async () => {
     try {
       const account = await invokeBackend<AccountInfo>("complete_login");
@@ -400,6 +415,7 @@ export function useAccounts() {
     exportAccountsSlimText,
     importAccountsSlimText,
     startOAuthLogin,
+    reloginAccount,
     completeOAuthLogin,
     cancelOAuthLogin,
     loadMaskedAccountIds,

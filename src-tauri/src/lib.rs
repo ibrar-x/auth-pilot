@@ -32,7 +32,7 @@ use commands::{
     recovery_ignore, recovery_list_interrupted, recovery_open_log, recovery_reopen,
     recovery_resume_available, refresh_account_metadata, refresh_all_accounts_usage,
     rename_account, save_settings, set_masked_account_ids, show_main_window, start_login,
-    switch_account, tray_popup_interaction, warmup_account, warmup_all_accounts,
+    start_relogin, switch_account, tray_popup_interaction, warmup_account, warmup_all_accounts,
 };
 use types::MonitorState;
 
@@ -135,6 +135,7 @@ pub fn run() {
             set_masked_account_ids,
             // OAuth
             start_login,
+            start_relogin,
             complete_login,
             cancel_login,
             // Usage

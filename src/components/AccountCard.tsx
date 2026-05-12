@@ -8,6 +8,7 @@ interface AccountCardProps {
   onSwitch: () => void;
   onDelete: () => void;
   onRefresh: () => Promise<void>;
+  onRelogin?: () => Promise<unknown>;
   onRename: (newName: string) => Promise<void>;
   switching?: boolean;
   switchDisabled?: boolean;
@@ -44,6 +45,7 @@ export function AccountCard({
   onSwitch,
   onDelete,
   onRefresh,
+  onRelogin,
   onRename,
   switching,
   switchDisabled,
@@ -59,6 +61,8 @@ export function AccountCard({
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(account.name);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [isRelogging, setIsRelogging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -70,13 +74,32 @@ export function AccountCard({
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
+    setRefreshError(null);
     try {
       await onRefresh();
       setLastRefresh(new Date());
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setRefreshError(message);
       console.error("Failed to refresh usage:", err);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleRelogin = async () => {
+    if (!onRelogin) return;
+    setIsRelogging(true);
+    setRefreshError(null);
+    try {
+      await onRelogin();
+      setLastRefresh(new Date());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setRefreshError(message);
+      console.error("Failed to reconnect account:", err);
+    } finally {
+      setIsRelogging(false);
     }
   };
 
@@ -138,6 +161,12 @@ export function AccountCard({
   const displayedEmail = account.email ? getMaskedText(account.email, effectivePrivacyMask) : null;
   const detailsHidden = effectivePrivacyMask.enabled;
   const globalPrivacyActive = privacyMask?.enabled ?? false;
+  const usageError = account.usage?.error ?? refreshError;
+  const needsBrowserRelogin =
+    account.auth_mode === "chat_g_p_t" &&
+    !!usageError &&
+    (usageError.includes("Browser login required") ||
+      usageError.includes("refresh_token_reused"));
 
   return (
     <div
@@ -225,6 +254,28 @@ export function AccountCard({
           Last updated: {formatLastRefresh(lastRefresh)}
         </div>
       </div>
+
+      {usageError && (
+        <div className="mb-4 rounded-[4px] border border-[#CF4500]/35 bg-[#FFF4EF] dark:bg-[#2a1d18] px-4 py-3">
+          <div className="text-sm font-medium text-[#CF4500] dark:text-[#F37338]">
+            {needsBrowserRelogin ? "Browser login required" : "Refresh failed"}
+          </div>
+          <p className="mt-1 text-xs leading-5 text-[#696969] dark:text-[#D1CDC7]">
+            {needsBrowserRelogin
+              ? "OpenAI rejected the saved refresh token. Reconnect this account with browser login; AuthPilot will update the existing account."
+              : usageError}
+          </p>
+          {needsBrowserRelogin && onRelogin && (
+            <button
+              onClick={handleRelogin}
+              disabled={isRelogging}
+              className="mt-3 px-3 py-2 text-xs font-medium rounded-[4px] bg-[#141413] hover:bg-[#262627] dark:bg-[#f3f0ee] dark:hover:bg-white text-[#F3F0EE] dark:text-[#141413] transition-colors disabled:opacity-50"
+            >
+              {isRelogging ? "Waiting for login..." : "Retry login"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-2">
         {account.is_active ? (

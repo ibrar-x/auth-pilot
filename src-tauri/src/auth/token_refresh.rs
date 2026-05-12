@@ -84,7 +84,13 @@ pub async fn refresh_chatgpt_tokens(account: &StoredAccount) -> Result<StoredAcc
                 );
                 return Ok(latest);
             }
-            return Err(err);
+            let message = refresh_token_reused_user_message(&account);
+            tracing::warn!(
+                account_id = %account.id,
+                account_name = %account.name,
+                "Token refresh requires browser re-login: refresh token was already used"
+            );
+            return Err(anyhow::anyhow!("{message}"));
         }
         Err(err) => return Err(err),
     };
@@ -169,6 +175,13 @@ fn latest_usable_account_after_external_refresh(
 
 fn is_refresh_token_reused_error(err: &anyhow::Error) -> bool {
     format!("{err:#}").contains(REFRESH_TOKEN_REUSED_CODE)
+}
+
+fn refresh_token_reused_user_message(account: &StoredAccount) -> String {
+    format!(
+        "Browser login required for {}. OpenAI rejected the saved refresh token because it was already used. Click Retry login to reconnect this account without removing it.",
+        account.name
+    )
 }
 
 pub async fn create_chatgpt_account_from_refresh_token(
@@ -268,4 +281,29 @@ async fn refresh_tokens_with_refresh_token(refresh_token: &str) -> Result<Refres
         .json::<RefreshTokenResponse>()
         .await
         .context("Failed to parse token refresh response")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_token_reused_message_points_to_retry_login() {
+        let account = StoredAccount::new_chatgpt(
+            "Work".to_string(),
+            Some("work@example.com".to_string()),
+            Some("plus".to_string()),
+            None,
+            "id".to_string(),
+            "access".to_string(),
+            "refresh".to_string(),
+            Some("acc".to_string()),
+        );
+
+        let message = refresh_token_reused_user_message(&account);
+
+        assert!(message.contains("Browser login required"));
+        assert!(message.contains("Retry login"));
+        assert!(message.contains("without removing it"));
+    }
 }
