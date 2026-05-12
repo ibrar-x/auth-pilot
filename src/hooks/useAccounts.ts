@@ -7,7 +7,7 @@ import type {
   AppSettings,
   SwitchEvent,
 } from "../types";
-import { invokeBackend, isTauriRuntime, type FileSource } from "../lib/platform";
+import { invokeBackend, isTauriRuntime, openExternalUrl, type FileSource } from "../lib/platform";
 
 export function useAccounts() {
   const [accounts, setAccounts] = useState<AccountWithUsage[]>([]);
@@ -291,7 +291,12 @@ export function useAccounts() {
         "start_relogin",
         { accountId }
       );
-      window.open(info.auth_url, "_blank");
+      try {
+        await openExternalUrl(info.auth_url);
+      } catch (err) {
+        console.error("Failed to open re-login URL:", err);
+        throw new Error(`Could not open browser login automatically. Open this URL manually: ${info.auth_url}`);
+      }
       const account = await invokeBackend<AccountInfo>("complete_login");
       const accountList = await loadAccounts();
       await refreshUsage(accountList);
