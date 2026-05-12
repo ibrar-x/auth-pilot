@@ -1,7 +1,7 @@
 {
   "name": "authpilot",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Intelligent multi-account manager for Codex CLI — AuthPilot",
   "type": "module",
   "scripts": {
