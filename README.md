@@ -12,6 +12,10 @@ AuthPilot lives in your menu bar or system tray, silently monitors all your Code
 
 ![AuthPilot dashboard](docs/assets/screenshots/auth-pilot-app-ss.png)
 
+### Tray
+
+![AuthPilot tray popup](docs/assets/screenshots/auth-p-tray.png)
+
 ## Features
 
 - **Tray-first desktop app** — Lives in the macOS menu bar, Windows tray, or Linux status area
