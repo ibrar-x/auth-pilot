@@ -412,6 +412,7 @@ pub struct MonitorState {
     pub is_monitor_running: bool,
     pub cached_accounts: Option<AccountsStore>,
     pub last_hard_exhausted_auto_switch_attempt: Option<DateTime<Utc>>,
+    pub last_manual_switch_at: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]

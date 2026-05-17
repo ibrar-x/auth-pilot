@@ -19,6 +19,7 @@ const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const EXPIRY_SKEW_SECONDS: i64 = 60;
 const REFRESH_TOKEN_REUSED_CODE: &str = "refresh_token_reused";
+const TOKEN_INVALIDATED_CODE: &str = "token_invalidated";
 
 static TOKEN_REFRESH_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<Mutex<()>>>>> =
     OnceLock::new();
@@ -89,6 +90,15 @@ pub async fn refresh_chatgpt_tokens(account: &StoredAccount) -> Result<StoredAcc
                 account_id = %account.id,
                 account_name = %account.name,
                 "Token refresh requires browser re-login: refresh token was already used"
+            );
+            return Err(anyhow::anyhow!("{message}"));
+        }
+        Err(err) if is_token_invalidated_error(&err) => {
+            let message = token_invalidated_user_message(&account);
+            tracing::warn!(
+                account_id = %account.id,
+                account_name = %account.name,
+                "Token refresh requires browser re-login: token was invalidated"
             );
             return Err(anyhow::anyhow!("{message}"));
         }
@@ -177,9 +187,20 @@ fn is_refresh_token_reused_error(err: &anyhow::Error) -> bool {
     format!("{err:#}").contains(REFRESH_TOKEN_REUSED_CODE)
 }
 
+fn is_token_invalidated_error(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains(TOKEN_INVALIDATED_CODE)
+}
+
 fn refresh_token_reused_user_message(account: &StoredAccount) -> String {
     format!(
         "Browser login required for {}. OpenAI rejected the saved refresh token because it was already used. Click Retry login to reconnect this account without removing it.",
+        account.name
+    )
+}
+
+fn token_invalidated_user_message(account: &StoredAccount) -> String {
+    format!(
+        "Browser login required for {}. OpenAI invalidated the saved authentication token. Click Retry login to reconnect this account without removing it.",
         account.name
     )
 }

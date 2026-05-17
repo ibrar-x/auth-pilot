@@ -85,9 +85,56 @@ pub async fn fetch_chatgpt_account_metadata(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
+        if status == StatusCode::UNAUTHORIZED {
+            tracing::warn!(
+                account_id = %account.id,
+                account_name = %account.name,
+                "Accounts check returned 401, refreshing ChatGPT token and retrying"
+            );
+            let refreshed_account = refresh_chatgpt_tokens(account).await?;
+            let (retry_token, retry_account_id) = extract_chatgpt_auth(&refreshed_account)?;
+            let retry_response =
+                send_chatgpt_get_request(CHATGPT_ACCOUNTS_CHECK_API, retry_token, retry_account_id)
+                    .await?;
+            if retry_response.status().is_success() {
+                return parse_account_metadata_response(retry_response, retry_account_id).await;
+            }
+
+            let retry_status = retry_response.status();
+            let retry_body = retry_response.text().await.unwrap_or_default();
+            if retry_status == StatusCode::UNAUTHORIZED && body_requires_browser_login(&retry_body)
+            {
+                let message = browser_login_required_message(&account.name);
+                tracing::warn!(
+                    account_id = %account.id,
+                    account_name = %account.name,
+                    "Accounts check token was invalidated after refresh retry; browser re-login required"
+                );
+                anyhow::bail!("{message}");
+            }
+
+            anyhow::bail!("Accounts check API error: {retry_status} - {retry_body}");
+        }
+
+        if body_requires_browser_login(&body) {
+            let message = browser_login_required_message(&account.name);
+            tracing::warn!(
+                account_id = %account.id,
+                account_name = %account.name,
+                "Accounts check token invalidated; browser re-login required"
+            );
+            anyhow::bail!("{message}");
+        }
         anyhow::bail!("Accounts check API error: {status} - {body}");
     }
 
+    parse_account_metadata_response(response, chatgpt_account_id).await
+}
+
+async fn parse_account_metadata_response(
+    response: reqwest::Response,
+    chatgpt_account_id: Option<&str>,
+) -> Result<ChatGptAccountMetadata> {
     let payload: AccountsCheckResponse = response
         .json()
         .await
@@ -139,7 +186,13 @@ async fn parse_usage_response(
     let status = response.status();
 
     if !status.is_success() {
-        let _body = response.text().await.unwrap_or_default();
+        let body = response.text().await.unwrap_or_default();
+        if status == StatusCode::UNAUTHORIZED && body_requires_browser_login(&body) {
+            return Ok(UsageInfo::error(
+                account_id.to_string(),
+                browser_login_required_message(_account_name),
+            ));
+        }
         return Ok(UsageInfo::error(
             account_id.to_string(),
             format!("API error: {status}"),
@@ -156,6 +209,16 @@ async fn parse_usage_response(
 
     let usage = convert_payload_to_usage_info(account_id, payload);
     Ok(usage)
+}
+
+fn body_requires_browser_login(body: &str) -> bool {
+    body.contains("token_invalidated") || body.contains("refresh_token_reused")
+}
+
+fn browser_login_required_message(account_name: &str) -> String {
+    format!(
+        "Browser login required for {account_name}. OpenAI invalidated the saved authentication token. Click Retry login to reconnect this account without removing it."
+    )
 }
 
 fn build_chatgpt_headers(

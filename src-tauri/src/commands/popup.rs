@@ -1,6 +1,8 @@
 //! Tray popup Tauri commands
 
+use crate::api::usage::refresh_all_usage;
 use crate::auth::storage::{get_active_account, load_accounts_with_current_active};
+use crate::auto_switch;
 use crate::switch_executor;
 use crate::tray::PopupInteractionState;
 use crate::types::{AccountInfo, SwitchReason, UsageInfo};
@@ -19,8 +21,11 @@ pub struct TrayPopupData {
 
 #[tauri::command]
 pub async fn get_tray_popup_data(
+    app: AppHandle,
     state: tauri::State<'_, Arc<RwLock<MonitorState>>>,
 ) -> Result<TrayPopupData, String> {
+    refresh_usage_and_switch_if_needed(&app, &state).await;
+
     let store = load_accounts_with_current_active().map_err(|e| e.to_string())?;
     let active_id = store.active_account_id.as_deref();
 
@@ -44,6 +49,49 @@ pub async fn get_tray_popup_data(
         accounts,
         usages,
     })
+}
+
+async fn refresh_usage_and_switch_if_needed(app: &AppHandle, state: &Arc<RwLock<MonitorState>>) {
+    let Ok(store) = load_accounts_with_current_active() else {
+        return;
+    };
+
+    let usages = refresh_all_usage(&store.accounts).await;
+    {
+        let mut state_guard = state.write().await;
+        state_guard.cached_accounts = Some(store.clone());
+        state_guard.latest_usages = usages.clone();
+    }
+    let _ = app.emit("usage-update", &usages);
+
+    let Some(active_id) = store.active_account_id.clone() else {
+        return;
+    };
+    let Some(usage) = usages.iter().find(|usage| usage.account_id == active_id) else {
+        return;
+    };
+
+    let should_switch = {
+        let state_guard = state.read().await;
+        !crate::monitor::manual_switch_cooldown_active(&state_guard, chrono::Utc::now())
+            && auto_switch::should_auto_switch(usage, &state_guard.settings, &store)
+    };
+
+    if !should_switch {
+        return;
+    }
+
+    match auto_switch::trigger(active_id, app, state).await {
+        Ok(auto_switch::TriggerOutcome::Switched) => {
+            tracing::info!("Tray-open threshold check switched account");
+        }
+        Ok(auto_switch::TriggerOutcome::Deferred) => {
+            tracing::info!("Tray-open threshold check deferred because Codex is busy");
+        }
+        Err(err) => {
+            tracing::warn!("Tray-open threshold check failed: {err}");
+        }
+    }
 }
 
 #[tauri::command]

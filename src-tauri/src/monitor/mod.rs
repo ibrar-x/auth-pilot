@@ -64,11 +64,12 @@ pub fn start_monitor(app_handle: AppHandle, state: Arc<RwLock<MonitorState>>) {
                             let hard_exhausted = auto_switch::usage_is_hard_exhausted(usage);
                             let should_switch = {
                                 let state_guard = state.read().await;
-                                auto_switch::should_auto_switch(
-                                    usage,
-                                    &state_guard.settings,
-                                    &store,
-                                )
+                                !manual_switch_cooldown_active(&state_guard, Utc::now())
+                                    && auto_switch::should_auto_switch(
+                                        usage,
+                                        &state_guard.settings,
+                                        &store,
+                                    )
                             };
                             critical_switch_pending = critical_usage && should_switch;
 
@@ -193,6 +194,20 @@ fn active_account_matches_decision(
 fn apply_manual_switch_auto_reset(state: &mut MonitorState, now: DateTime<Utc>) {
     state.settings.last_auto_switch = Some(now);
     state.last_hard_exhausted_auto_switch_attempt = None;
+    state.last_manual_switch_at = Some(now);
+}
+
+pub fn manual_switch_cooldown_active(state: &MonitorState, now: DateTime<Utc>) -> bool {
+    let Some(last_manual_switch_at) = state.last_manual_switch_at else {
+        return false;
+    };
+
+    let cooldown_seconds = state.settings.global_cooldown_seconds as i64;
+    cooldown_seconds > 0
+        && now
+            .signed_duration_since(last_manual_switch_at)
+            .num_seconds()
+            < cooldown_seconds
 }
 
 pub async fn reset_after_manual_switch(state: &Arc<RwLock<MonitorState>>) {
@@ -274,5 +289,7 @@ mod tests {
 
         assert_eq!(state.settings.last_auto_switch, Some(now));
         assert_eq!(state.last_hard_exhausted_auto_switch_attempt, None);
+        assert_eq!(state.last_manual_switch_at, Some(now));
+        assert!(manual_switch_cooldown_active(&state, now));
     }
 }

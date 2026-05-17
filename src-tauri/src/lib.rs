@@ -101,6 +101,7 @@ pub fn run() {
                 is_monitor_running: false,
                 cached_accounts,
                 last_hard_exhausted_auto_switch_attempt: None,
+                last_manual_switch_at: None,
             }));
 
             app.manage(state.clone());
