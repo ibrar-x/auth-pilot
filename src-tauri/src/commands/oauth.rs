@@ -97,19 +97,43 @@ pub async fn complete_login() -> Result<AccountInfo, String> {
         .map_err(|e| e.to_string())?;
 
     let stored = if let Some(account_id) = pending.replace_account_id {
-        replace_existing_chatgpt_account(account_id, account).map_err(|e| e.to_string())?
-    } else {
-        add_account(account).map_err(|e| e.to_string())?
-    };
+        let stored =
+            replace_existing_chatgpt_account(account_id, account).map_err(|e| e.to_string())?;
+        let store = load_accounts().map_err(|e| e.to_string())?;
+        let active_id = store.active_account_id.as_deref();
 
-    set_active_account(&stored.id).map_err(|e| e.to_string())?;
-    switch_to_account(&stored).map_err(|e| e.to_string())?;
-    touch_account(&stored.id).map_err(|e| e.to_string())?;
+        if relogin_account_is_active(&stored.id, active_id) {
+            switch_to_account(&stored).map_err(|e| e.to_string())?;
+            tracing::info!(
+                account_id = %stored.id,
+                account_name = %stored.name,
+                "Browser re-login updated credentials for active account without changing account priority"
+            );
+        } else {
+            tracing::info!(
+                account_id = %stored.id,
+                account_name = %stored.name,
+                "Browser re-login updated inactive account without switching active account"
+            );
+        }
+
+        return Ok(AccountInfo::from_stored(&stored, active_id));
+    } else {
+        let stored = add_account(account).map_err(|e| e.to_string())?;
+        set_active_account(&stored.id).map_err(|e| e.to_string())?;
+        switch_to_account(&stored).map_err(|e| e.to_string())?;
+        touch_account(&stored.id).map_err(|e| e.to_string())?;
+        stored
+    };
 
     let store = load_accounts().map_err(|e| e.to_string())?;
     let active_id = store.active_account_id.as_deref();
 
     Ok(AccountInfo::from_stored(&stored, active_id))
+}
+
+fn relogin_account_is_active(relogin_account_id: &str, active_id: Option<&str>) -> bool {
+    active_id == Some(relogin_account_id)
 }
 
 fn replace_existing_chatgpt_account(
@@ -158,4 +182,25 @@ pub async fn cancel_login() -> Result<(), String> {
         pending_oauth.cancelled.store(true, Ordering::Relaxed);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relogin_for_inactive_account_does_not_request_active_auth_write() {
+        assert!(!relogin_account_is_active(
+            "relogin-account",
+            Some("active-account")
+        ));
+    }
+
+    #[test]
+    fn relogin_for_active_account_updates_current_auth_file_only() {
+        assert!(relogin_account_is_active(
+            "active-account",
+            Some("active-account")
+        ));
+    }
 }
