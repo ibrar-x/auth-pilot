@@ -17,6 +17,9 @@ use crate::types::{parse_chatgpt_id_token_claims, OAuthLoginInfo, StoredAccount}
 const DEFAULT_ISSUER: &str = "https://auth.openai.com";
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const DEFAULT_PORT: u16 = 1455;
+const CODEX_OAUTH_SCOPE: &str =
+    "openid profile email offline_access api.connectors.read api.connectors.invoke";
+const CODEX_OAUTH_ORIGINATOR: &str = "Codex Desktop";
 
 #[derive(Debug, Clone)]
 pub struct PkceCodes {
@@ -55,13 +58,13 @@ fn build_authorize_url(
         ("response_type", "code"),
         ("client_id", client_id),
         ("redirect_uri", redirect_uri),
-        ("scope", "openid profile email offline_access"),
+        ("scope", CODEX_OAUTH_SCOPE),
         ("code_challenge", &pkce.code_challenge),
         ("code_challenge_method", "S256"),
         ("id_token_add_organizations", "true"),
         ("codex_cli_simplified_flow", "true"),
         ("state", state),
-        ("originator", "codex_cli_rs"),
+        ("originator", CODEX_OAUTH_ORIGINATOR),
     ];
 
     let query_string = params
@@ -342,4 +345,46 @@ pub async fn wait_for_oauth_login(
 ) -> Result<StoredAccount> {
     let result = rx.await.context("OAuth login was cancelled")??;
     Ok(result.account)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authorize_url_matches_current_codex_login_contract() {
+        let pkce = PkceCodes {
+            code_verifier: "verifier".to_string(),
+            code_challenge: "challenge".to_string(),
+        };
+
+        let url = build_authorize_url(
+            DEFAULT_ISSUER,
+            CLIENT_ID,
+            "http://localhost:1455/auth/callback",
+            &pkce,
+            "state",
+        );
+        let parsed = url::Url::parse(&url).expect("authorize url parses");
+        let params: std::collections::HashMap<String, String> =
+            parsed.query_pairs().into_owned().collect();
+
+        assert_eq!(
+            parsed.as_str().split('?').next(),
+            Some("https://auth.openai.com/oauth/authorize")
+        );
+        assert_eq!(params.get("client_id").map(String::as_str), Some(CLIENT_ID));
+        assert_eq!(
+            params.get("scope").map(String::as_str),
+            Some(CODEX_OAUTH_SCOPE)
+        );
+        assert_eq!(
+            params.get("originator").map(String::as_str),
+            Some(CODEX_OAUTH_ORIGINATOR)
+        );
+        assert_eq!(
+            params.get("codex_cli_simplified_flow").map(String::as_str),
+            Some("true")
+        );
+    }
 }
